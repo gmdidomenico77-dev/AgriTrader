@@ -1,8 +1,14 @@
+import React, { useState } from 'react';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from "@react-navigation/native"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { StatusBar } from "expo-status-bar"
 import { Ionicons } from "@expo/vector-icons"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
+
+// Import contexts
+import { AuthProvider, useAuth } from "./components/AuthContext"
+import { UserProfileProvider, useUserProfile } from "./components/UserProfileContext"
 
 // Import screens
 import HomeScreen from "./app/(tabs)/HomeScreen"
@@ -10,13 +16,63 @@ import ForecastScreen from "./app/(tabs)/ForecastScreen"
 import MarketplaceScreen from "./app/(tabs)/MarketplaceScreen"
 import AddListingScreen from "./app/(tabs)/AddListingScreen"
 import ProfileScreen from "./app/(tabs)/ProfileScreen"
+import LoginScreen from "./app/LoginScreen"
+import RegisterScreen from "./app/RegisterScreen"
+import OnboardingScreen from "./app/OnboardingScreen"
 
 const Tab = createBottomTabNavigator()
 
-export default function App() {
+interface UserProfile {
+  displayName: string;
+  location: string;
+  farmName: string;
+}
+
+function AuthNavigator() {
+  const [authScreen, setAuthScreen] = useState<'login' | 'register'>('login');
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const { isAuthenticated, loading } = useAuth();
+  const { profile, loading: profileLoading } = useUserProfile();
+
+  if (loading || profileLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2d5016" />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    if (authScreen === 'login') {
+      return (
+        <LoginScreen 
+          onLoginSuccess={() => setShowOnboarding(true)}
+          onSwitchToRegister={() => setAuthScreen('register')}
+        />
+      );
+    } else {
+      return (
+        <RegisterScreen 
+          onRegisterSuccess={() => setShowOnboarding(true)}
+          onSwitchToLogin={() => setAuthScreen('login')}
+        />
+      );
+    }
+  }
+
+  if (showOnboarding || !profile) {
+    return (
+      <OnboardingScreen 
+        onComplete={async (profileData: UserProfile) => {
+          // Profile will be saved by the UserProfileProvider
+          setShowOnboarding(false);
+        }}
+      />
+    );
+  }
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <NavigationContainer>
+    <NavigationContainer>
       <StatusBar style="light" backgroundColor="#2d5016" />
       <Tab.Navigator
         screenOptions={({ route }: { route: any }) => ({
@@ -64,7 +120,27 @@ export default function App() {
         <Tab.Screen name="Add" component={AddListingScreen} options={{ title: "Add Listing" }} />
         <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       </Tab.Navigator>
-      </NavigationContainer>
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <UserProfileProvider>
+          <AuthNavigator />
+        </UserProfileProvider>
+      </AuthProvider>
     </GestureHandlerRootView>
   )
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+  },
+});

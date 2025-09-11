@@ -1,7 +1,13 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native"
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { useUserProfile } from "../../components/UserProfileContext"
+import { useAuth } from "../../components/AuthContext"
+import { signOutUser } from "../../lib/authService"
 
 const ProfileScreen = () => {
+  const { profile } = useUserProfile();
+  const { user } = useAuth();
+
   const savedAlerts = [
     {
       id: 1,
@@ -18,9 +24,10 @@ const ProfileScreen = () => {
   ]
 
   const farmInfo = {
-    name: "Hermitage, PA",
-    size: "450 acres",
-    crops: ["Corn", "Soybeans", "Wheat"],
+    name: profile?.farmName || "Your Farm",
+    location: profile?.location || "Location not set",
+    size: "450 acres", // This could be added to profile later
+    crops: ["Corn", "Soybeans", "Wheat"], // This could be added to profile later
   }
 
   const summary = {
@@ -28,6 +35,26 @@ const ProfileScreen = () => {
     pastSales: 450,
     totalEarnings: "$12,450",
   }
+
+  const handleSignOut = async () => {
+    Alert.alert(
+      "Sign Out",
+      "Are you sure you want to sign out?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: async () => {
+            const result = await signOutUser();
+            if (!result.success) {
+              Alert.alert("Error", "Failed to sign out. Please try again.");
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <ScrollView style={styles.container}>
@@ -40,6 +67,7 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         </View>
         <Text style={styles.farmName}>{farmInfo.name}</Text>
+        <Text style={styles.farmSize}>{farmInfo.location}</Text>
         <Text style={styles.farmSize}>{farmInfo.size}</Text>
         <View style={styles.cropsContainer}>
           {farmInfo.crops.map((crop, index) => (
@@ -119,7 +147,7 @@ const ProfileScreen = () => {
           <Ionicons name="chevron-forward" size={20} color="#6b7280" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.settingItem}>
+        <TouchableOpacity style={styles.settingItem} onPress={handleSignOut}>
           <View style={styles.settingLeft}>
             <Ionicons name="log-out-outline" size={24} color="#ef4444" />
             <Text style={[styles.settingText, { color: "#ef4444" }]}>Sign Out</Text>
