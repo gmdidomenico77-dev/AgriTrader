@@ -80,6 +80,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       
       if (success) {
         onComplete(profileData);
+        console.log('profile saved');
       } else {
         Alert.alert('Error', 'Failed to save profile. Please try again.');
       }

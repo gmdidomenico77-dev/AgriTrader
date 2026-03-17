@@ -1,0 +1,924 @@
+{
+  "generated_at": "2025-10-14T22:25:26.969947",
+  "version": "1.0",
+  "predictions": {
+    "corn": {
+      "PA": {
+        "prediction": {
+          "crop": "corn",
+          "predicted_price": 5.9342600190394235,
+          "confidence_lower": 5.438633453613941,
+          "confidence_upper": 6.429886584464905,
+          "model_confidence": 0.9605369200104058,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:28.616133",
+          "location": "PA",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 96
+          },
+          "market_analysis": {
+            "trend": "Upward",
+            "volatility": "High",
+            "best_selling_time": "Next 2-3 weeks"
+          }
+        },
+        "graph": {
+          "crop": "corn",
+          "location": "PA",
+          "data_points": [
+            {
+              "crop": "corn",
+              "predicted_price": 5.9342600190394235,
+              "confidence_lower": 5.438633453613941,
+              "confidence_upper": 6.429886584464905,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:28.702322"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 5.9342600190394235,
+              "confidence_lower": 5.438633453613941,
+              "confidence_upper": 6.429886584464905,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:28.707036"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 5.9342600190394235,
+              "confidence_lower": 5.438633453613941,
+              "confidence_upper": 6.429886584464905,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:28.710747"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 5.9342600190394235,
+              "confidence_lower": 5.438633453613941,
+              "confidence_upper": 6.429886584464905,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:28.714473"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 5.9342600190394235,
+              "confidence_lower": 5.438633453613941,
+              "confidence_upper": 6.429886584464905,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:28.718114"
+            }
+          ],
+          "current_price": 5.9342600190394235,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "OH": {
+        "prediction": {
+          "crop": "corn",
+          "predicted_price": 6.176474713694094,
+          "confidence_lower": 5.660618492536959,
+          "confidence_upper": 6.692330934851228,
+          "model_confidence": 0.9605369200104058,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:28.806944",
+          "location": "OH",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 96
+          },
+          "market_analysis": {
+            "trend": "Upward",
+            "volatility": "High",
+            "best_selling_time": "Next 2-3 weeks"
+          }
+        },
+        "graph": {
+          "crop": "corn",
+          "location": "OH",
+          "data_points": [
+            {
+              "crop": "corn",
+              "predicted_price": 6.176474713694094,
+              "confidence_lower": 5.660618492536959,
+              "confidence_upper": 6.692330934851228,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:28.904688"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.176474713694094,
+              "confidence_lower": 5.660618492536959,
+              "confidence_upper": 6.692330934851228,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:28.908820"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.176474713694094,
+              "confidence_lower": 5.660618492536959,
+              "confidence_upper": 6.692330934851228,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:28.912488"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.176474713694094,
+              "confidence_lower": 5.660618492536959,
+              "confidence_upper": 6.692330934851228,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:28.916141"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.176474713694094,
+              "confidence_lower": 5.660618492536959,
+              "confidence_upper": 6.692330934851228,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:28.919916"
+            }
+          ],
+          "current_price": 6.176474713694094,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "IN": {
+        "prediction": {
+          "crop": "corn",
+          "predicted_price": 6.115921040030426,
+          "confidence_lower": 5.605122232806205,
+          "confidence_upper": 6.6267198472546465,
+          "model_confidence": 0.9605369200104058,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:29.017943",
+          "location": "IN",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 96
+          },
+          "market_analysis": {
+            "trend": "Upward",
+            "volatility": "High",
+            "best_selling_time": "Next 2-3 weeks"
+          }
+        },
+        "graph": {
+          "crop": "corn",
+          "location": "IN",
+          "data_points": [
+            {
+              "crop": "corn",
+              "predicted_price": 6.115921040030426,
+              "confidence_lower": 5.605122232806205,
+              "confidence_upper": 6.6267198472546465,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:29.104515"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.115921040030426,
+              "confidence_lower": 5.605122232806205,
+              "confidence_upper": 6.6267198472546465,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:29.109782"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.115921040030426,
+              "confidence_lower": 5.605122232806205,
+              "confidence_upper": 6.6267198472546465,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:29.113710"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.115921040030426,
+              "confidence_lower": 5.605122232806205,
+              "confidence_upper": 6.6267198472546465,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:29.117376"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.115921040030426,
+              "confidence_lower": 5.605122232806205,
+              "confidence_upper": 6.6267198472546465,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:29.121856"
+            }
+          ],
+          "current_price": 6.115921040030426,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "IL": {
+        "prediction": {
+          "crop": "corn",
+          "predicted_price": 6.055367366366759,
+          "confidence_lower": 5.54962597307545,
+          "confidence_upper": 6.561108759658066,
+          "model_confidence": 0.9605369200104058,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:29.211597",
+          "location": "IL",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 96
+          },
+          "market_analysis": {
+            "trend": "Upward",
+            "volatility": "High",
+            "best_selling_time": "Next 2-3 weeks"
+          }
+        },
+        "graph": {
+          "crop": "corn",
+          "location": "IL",
+          "data_points": [
+            {
+              "crop": "corn",
+              "predicted_price": 6.055367366366759,
+              "confidence_lower": 5.54962597307545,
+              "confidence_upper": 6.561108759658066,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:29.300674"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.055367366366759,
+              "confidence_lower": 5.54962597307545,
+              "confidence_upper": 6.561108759658066,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:29.306448"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.055367366366759,
+              "confidence_lower": 5.54962597307545,
+              "confidence_upper": 6.561108759658066,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:29.312245"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.055367366366759,
+              "confidence_lower": 5.54962597307545,
+              "confidence_upper": 6.561108759658066,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:29.317300"
+            },
+            {
+              "crop": "corn",
+              "predicted_price": 6.055367366366759,
+              "confidence_lower": 5.54962597307545,
+              "confidence_upper": 6.561108759658066,
+              "model_confidence": 0.9605369200104058,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:29.322916"
+            }
+          ],
+          "current_price": 6.055367366366759,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      }
+    },
+    "soybeans": {
+      "PA": {
+        "prediction": {
+          "crop": "soybeans",
+          "predicted_price": 10.441639202193835,
+          "confidence_lower": 9.736888073202401,
+          "confidence_upper": 11.14639033118527,
+          "model_confidence": 0.9747281512343877,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:29.416556",
+          "location": "PA",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 97
+          },
+          "market_analysis": {
+            "trend": "Downward",
+            "volatility": "High",
+            "best_selling_time": "Immediately"
+          }
+        },
+        "graph": {
+          "crop": "soybeans",
+          "location": "PA",
+          "data_points": [
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.441639202193835,
+              "confidence_lower": 9.736888073202401,
+              "confidence_upper": 11.14639033118527,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:29.506827"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.441639202193835,
+              "confidence_lower": 9.736888073202401,
+              "confidence_upper": 11.14639033118527,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:29.514594"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.441639202193835,
+              "confidence_lower": 9.736888073202401,
+              "confidence_upper": 11.14639033118527,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:29.522705"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.441639202193835,
+              "confidence_lower": 9.736888073202401,
+              "confidence_upper": 11.14639033118527,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:29.527644"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.441639202193835,
+              "confidence_lower": 9.736888073202401,
+              "confidence_upper": 11.14639033118527,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:29.532200"
+            }
+          ],
+          "current_price": 10.441639202193835,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "OH": {
+        "prediction": {
+          "crop": "soybeans",
+          "predicted_price": 10.872222262078118,
+          "confidence_lower": 10.138409230860233,
+          "confidence_upper": 11.606035293296001,
+          "model_confidence": 0.9747281512343877,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:29.658718",
+          "location": "OH",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 97
+          },
+          "market_analysis": {
+            "trend": "Downward",
+            "volatility": "High",
+            "best_selling_time": "Immediately"
+          }
+        },
+        "graph": {
+          "crop": "soybeans",
+          "location": "OH",
+          "data_points": [
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.872222262078118,
+              "confidence_lower": 10.138409230860233,
+              "confidence_upper": 11.606035293296001,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:29.758216"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.872222262078118,
+              "confidence_lower": 10.138409230860233,
+              "confidence_upper": 11.606035293296001,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:29.763006"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.872222262078118,
+              "confidence_lower": 10.138409230860233,
+              "confidence_upper": 11.606035293296001,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:29.767572"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.872222262078118,
+              "confidence_lower": 10.138409230860233,
+              "confidence_upper": 11.606035293296001,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:29.773485"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.872222262078118,
+              "confidence_lower": 10.138409230860233,
+              "confidence_upper": 11.606035293296001,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:29.778972"
+            }
+          ],
+          "current_price": 10.872222262078118,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "IN": {
+        "prediction": {
+          "crop": "soybeans",
+          "predicted_price": 10.764576497107047,
+          "confidence_lower": 10.038028941445775,
+          "confidence_upper": 11.491124052768319,
+          "model_confidence": 0.9747281512343877,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:29.878443",
+          "location": "IN",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 97
+          },
+          "market_analysis": {
+            "trend": "Downward",
+            "volatility": "High",
+            "best_selling_time": "Immediately"
+          }
+        },
+        "graph": {
+          "crop": "soybeans",
+          "location": "IN",
+          "data_points": [
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:29.974018"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:29.978928"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:29.983843"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:29.989589"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:29.994798"
+            }
+          ],
+          "current_price": 10.764576497107047,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "IL": {
+        "prediction": {
+          "crop": "soybeans",
+          "predicted_price": 10.764576497107047,
+          "confidence_lower": 10.038028941445775,
+          "confidence_upper": 11.491124052768319,
+          "model_confidence": 0.9747281512343877,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:30.092579",
+          "location": "IL",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 97
+          },
+          "market_analysis": {
+            "trend": "Downward",
+            "volatility": "High",
+            "best_selling_time": "Immediately"
+          }
+        },
+        "graph": {
+          "crop": "soybeans",
+          "location": "IL",
+          "data_points": [
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:30.183360"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:30.189193"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:30.193789"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:30.197787"
+            },
+            {
+              "crop": "soybeans",
+              "predicted_price": 10.764576497107047,
+              "confidence_lower": 10.038028941445775,
+              "confidence_upper": 11.491124052768319,
+              "model_confidence": 0.9747281512343877,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:30.202119"
+            }
+          ],
+          "current_price": 10.764576497107047,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      }
+    },
+    "wheat": {
+      "PA": {
+        "prediction": {
+          "crop": "wheat",
+          "predicted_price": 6.563538472784086,
+          "confidence_lower": 5.7956144065854005,
+          "confidence_upper": 7.331462538982771,
+          "model_confidence": 0.9317327855097579,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:30.295584",
+          "location": "PA",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 93
+          },
+          "market_analysis": {
+            "trend": "Stable",
+            "volatility": "High",
+            "best_selling_time": "Within 1 week"
+          }
+        },
+        "graph": {
+          "crop": "wheat",
+          "location": "PA",
+          "data_points": [
+            {
+              "crop": "wheat",
+              "predicted_price": 6.563538472784086,
+              "confidence_lower": 5.7956144065854005,
+              "confidence_upper": 7.331462538982771,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:30.380849"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.563538472784086,
+              "confidence_lower": 5.7956144065854005,
+              "confidence_upper": 7.331462538982771,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:30.385336"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.563538472784086,
+              "confidence_lower": 5.7956144065854005,
+              "confidence_upper": 7.331462538982771,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:30.390727"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.563538472784086,
+              "confidence_lower": 5.7956144065854005,
+              "confidence_upper": 7.331462538982771,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:30.395032"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.563538472784086,
+              "confidence_lower": 5.7956144065854005,
+              "confidence_upper": 7.331462538982771,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:30.399144"
+            }
+          ],
+          "current_price": 6.563538472784086,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "OH": {
+        "prediction": {
+          "crop": "wheat",
+          "predicted_price": 6.629836841196046,
+          "confidence_lower": 5.8541559662478795,
+          "confidence_upper": 7.405517716144213,
+          "model_confidence": 0.9317327855097579,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:30.483958",
+          "location": "OH",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 93
+          },
+          "market_analysis": {
+            "trend": "Stable",
+            "volatility": "High",
+            "best_selling_time": "Within 1 week"
+          }
+        },
+        "graph": {
+          "crop": "wheat",
+          "location": "OH",
+          "data_points": [
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:30.572861"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:30.577256"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:30.580948"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:30.584610"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:30.588348"
+            }
+          ],
+          "current_price": 6.629836841196046,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "IN": {
+        "prediction": {
+          "crop": "wheat",
+          "predicted_price": 6.497240104372125,
+          "confidence_lower": 5.7370728469229215,
+          "confidence_upper": 7.257407361821328,
+          "model_confidence": 0.9317327855097579,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:30.671391",
+          "location": "IN",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 93
+          },
+          "market_analysis": {
+            "trend": "Stable",
+            "volatility": "High",
+            "best_selling_time": "Within 1 week"
+          }
+        },
+        "graph": {
+          "crop": "wheat",
+          "location": "IN",
+          "data_points": [
+            {
+              "crop": "wheat",
+              "predicted_price": 6.497240104372125,
+              "confidence_lower": 5.7370728469229215,
+              "confidence_upper": 7.257407361821328,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:30.751539"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.497240104372125,
+              "confidence_lower": 5.7370728469229215,
+              "confidence_upper": 7.257407361821328,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:30.755473"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.497240104372125,
+              "confidence_lower": 5.7370728469229215,
+              "confidence_upper": 7.257407361821328,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:30.760124"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.497240104372125,
+              "confidence_lower": 5.7370728469229215,
+              "confidence_upper": 7.257407361821328,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:30.763872"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.497240104372125,
+              "confidence_lower": 5.7370728469229215,
+              "confidence_upper": 7.257407361821328,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:30.767708"
+            }
+          ],
+          "current_price": 6.497240104372125,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      },
+      "IL": {
+        "prediction": {
+          "crop": "wheat",
+          "predicted_price": 6.629836841196046,
+          "confidence_lower": 5.8541559662478795,
+          "confidence_upper": 7.405517716144213,
+          "model_confidence": 0.9317327855097579,
+          "days_ahead": 1,
+          "timestamp": "2025-10-14T22:25:30.850717",
+          "location": "IL",
+          "recommendation": {
+            "action": "Hold",
+            "confidence": "High",
+            "confidence_percentage": 93
+          },
+          "market_analysis": {
+            "trend": "Stable",
+            "volatility": "High",
+            "best_selling_time": "Within 1 week"
+          }
+        },
+        "graph": {
+          "crop": "wheat",
+          "location": "IL",
+          "data_points": [
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 1,
+              "timestamp": "2025-10-14T22:25:30.937897"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 3,
+              "timestamp": "2025-10-14T22:25:30.942239"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 7,
+              "timestamp": "2025-10-14T22:25:30.946173"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 14,
+              "timestamp": "2025-10-14T22:25:30.949958"
+            },
+            {
+              "crop": "wheat",
+              "predicted_price": 6.629836841196046,
+              "confidence_lower": 5.8541559662478795,
+              "confidence_upper": 7.405517716144213,
+              "model_confidence": 0.9317327855097579,
+              "days_ahead": 30,
+              "timestamp": "2025-10-14T22:25:30.954181"
+            }
+          ],
+          "current_price": 6.629836841196046,
+          "trend": "Stable",
+          "volatility": "Low"
+        }
+      }
+    }
+  }
+}

@@ -1,86 +1,50 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useListings } from "../../components/ListingsContext";
-import { useUserProfile } from "../../components/UserProfileContext";
+import { useState } from "react"
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert } from "react-native"
+import { Ionicons } from "@expo/vector-icons"
 
 const AddListingScreen = () => {
-  const { addListing } = useListings();
-  const { profile } = useUserProfile();
-
   const [formData, setFormData] = useState({
     crop: "Corn",
-    customCrop: "",
     weight: "",
     pricePerUnit: "",
     harvestDate: "",
     description: "",
-    location: profile?.location || "PA",
-  });
+    location: "",
+  })
 
-  const crops = ["Corn", "Soybeans", "Wheat", "Barley", "Oats", "Other"];
-  const [showCropPicker, setShowCropPicker] = useState(false);
+  const crops = ["Corn", "Soybeans", "Wheat", "Barley", "Oats"]
+  const [showCropPicker, setShowCropPicker] = useState(false)
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({
       ...prev,
       [field]: value,
-    }));
-  };
+    }))
+  }
 
-  const handleSubmit = async () => {
-    // Validation
+  const handleSubmit = () => {
     if (!formData.weight || !formData.pricePerUnit || !formData.harvestDate) {
-      Alert.alert("Missing Information", "Please fill in all required fields (*)");
-      return;
+      Alert.alert("Error", "Please fill in all required fields")
+      return
     }
 
-    if (formData.crop === "Other" && !formData.customCrop.trim()) {
-      Alert.alert("Missing Crop Name", "Please specify the crop type");
-      return;
-    }
-
-    // Prepare listing data
-    const cropName = formData.crop === "Other" ? formData.customCrop : formData.crop;
-    const quantity = parseFloat(formData.weight);
-    const pricePerUnit = parseFloat(formData.pricePerUnit);
-
-    if (isNaN(quantity) || isNaN(pricePerUnit)) {
-      Alert.alert("Invalid Numbers", "Please enter valid numbers for weight and price");
-      return;
-    }
-
-    // Save to AsyncStorage via ListingsContext
-    await addListing({
-      crop: cropName,
-      quantity: quantity,
-      pricePerUnit: pricePerUnit,
-      location: formData.location || profile?.location || "PA",
-      description: formData.description,
-    });
-
-    Alert.alert(
-      "Listing Posted! ✓",
-      `Your ${cropName} listing is now live in the marketplace.`,
-      [
-        {
-          text: "OK",
-          onPress: () => {
-            // Reset form
-            setFormData({
-              crop: "Corn",
-              customCrop: "",
-              weight: "",
-              pricePerUnit: "",
-              harvestDate: "",
-              description: "",
-              location: profile?.location || "PA",
-            });
-          },
+    Alert.alert("Success", "Your listing has been posted successfully!", [
+      {
+        text: "OK",
+        onPress: () => {
+          // Reset form
+          setFormData({
+            crop: "Corn",
+            weight: "",
+            pricePerUnit: "",
+            harvestDate: "",
+            description: "",
+            location: "",
+          })
         },
-      ]
-    );
-  };
+      },
+    ])
+  }
 
   return (
     <ScrollView style={styles.container}>
@@ -100,8 +64,8 @@ const AddListingScreen = () => {
                   key={crop}
                   style={styles.pickerOption}
                   onPress={() => {
-                    handleInputChange("crop", crop);
-                    setShowCropPicker(false);
+                    handleInputChange("crop", crop)
+                    setShowCropPicker(false)
                   }}
                 >
                   <Text style={styles.pickerOptionText}>{crop}</Text>
@@ -111,22 +75,9 @@ const AddListingScreen = () => {
           )}
         </View>
 
-        {/* Custom Crop (if Other selected) */}
-        {formData.crop === "Other" && (
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Specify Crop *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., Apples, Tomatoes, etc."
-              value={formData.customCrop}
-              onChangeText={(value) => handleInputChange("customCrop", value)}
-            />
-          </View>
-        )}
-
         {/* Weight */}
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Quantity *</Text>
+          <Text style={styles.label}>Weight *</Text>
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.input}
@@ -135,11 +86,7 @@ const AddListingScreen = () => {
               onChangeText={(value) => handleInputChange("weight", value)}
               keyboardType="numeric"
             />
-            <Text style={styles.inputSuffix}>
-              {formData.crop === "Corn" || formData.crop === "Soybeans" || formData.crop === "Wheat" 
-                ? "bu" 
-                : "lbs"}
-            </Text>
+            <Text style={styles.inputSuffix}>lbs</Text>
           </View>
         </View>
 
@@ -147,28 +94,23 @@ const AddListingScreen = () => {
         <View style={styles.formGroup}>
           <Text style={styles.label}>Price Per Unit *</Text>
           <View style={styles.inputContainer}>
-            <Text style={styles.inputPrefix}>$</Text>
             <TextInput
-              style={[styles.input, styles.inputWithPrefix]}
-              placeholder="4.50"
+              style={styles.input}
+              placeholder="0.55"
               value={formData.pricePerUnit}
               onChangeText={(value) => handleInputChange("pricePerUnit", value)}
-              keyboardType="decimal-pad"
+              keyboardType="numeric"
             />
-            <Text style={styles.inputSuffix}>
-              /{formData.crop === "Corn" || formData.crop === "Soybeans" || formData.crop === "Wheat" 
-                ? "bu" 
-                : "lb"}
-            </Text>
+            <Text style={styles.inputSuffix}>$ / lb</Text>
           </View>
         </View>
 
         {/* Harvest Date */}
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Available Date *</Text>
+          <Text style={styles.label}>Harvest Date *</Text>
           <TextInput
             style={styles.input}
-            placeholder="Nov 20, 2025"
+            placeholder="Jul 20, 2024"
             value={formData.harvestDate}
             onChangeText={(value) => handleInputChange("harvestDate", value)}
           />
@@ -187,7 +129,7 @@ const AddListingScreen = () => {
 
         {/* Description */}
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Description (Optional)</Text>
+          <Text style={styles.label}>Description</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Additional details about your crop..."
@@ -203,13 +145,11 @@ const AddListingScreen = () => {
         <View style={styles.infoCard}>
           <View style={styles.infoHeader}>
             <Ionicons name="information-circle" size={20} color="#2d5016" />
-            <Text style={styles.infoTitle}>Listing Tips</Text>
+            <Text style={styles.infoTitle}>Quality Standards</Text>
           </View>
           <Text style={styles.infoText}>
-            • Set competitive prices based on current market rates{'\n'}
-            • Provide accurate quantity and quality information{'\n'}
-            • Include specific location for easier buyer matching{'\n'}
-            • High-quality crops receive better visibility
+            Your crop will be inspected for quality before listing. High-quality crops receive better visibility and
+            pricing.
           </Text>
         </View>
 
@@ -219,8 +159,8 @@ const AddListingScreen = () => {
         </TouchableOpacity>
       </View>
     </ScrollView>
-  );
-};
+  )
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -240,7 +180,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    flex: 1,
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#d1d5db",
@@ -258,20 +197,10 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
     borderRadius: 8,
   },
-  inputPrefix: {
-    paddingLeft: 16,
-    fontSize: 16,
-    color: "#6b7280",
-    fontWeight: "600",
-  },
-  inputWithPrefix: {
-    borderWidth: 0,
-  },
   inputSuffix: {
     paddingHorizontal: 16,
-    fontSize: 14,
+    fontSize: 16,
     color: "#6b7280",
-    fontWeight: "500",
   },
   textArea: {
     height: 100,
@@ -350,6 +279,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#ffffff",
   },
-});
+})
 
-export default AddListingScreen;
+export default AddListingScreen

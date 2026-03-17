@@ -9,6 +9,9 @@ import { GestureHandlerRootView } from "react-native-gesture-handler"
 // Import contexts
 import { AuthProvider, useAuth } from "./components/AuthContext"
 import { UserProfileProvider, useUserProfile } from "./components/UserProfileContext"
+import { AlertsProvider } from "./components/AlertsContext"
+import { PreordersProvider } from "./components/PreordersContext"
+import { ListingsProvider } from "./components/ListingsContext"
 
 // Import screens
 import HomeScreen from "./app/(tabs)/HomeScreen"
@@ -129,7 +132,13 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <UserProfileProvider>
-          <AuthNavigator />
+          <AlertsProvider>
+            <PreordersProvider>
+              <ListingsProvider>
+                <AuthNavigator />
+              </ListingsProvider>
+            </PreordersProvider>
+          </AlertsProvider>
         </UserProfileProvider>
       </AuthProvider>
     </GestureHandlerRootView>

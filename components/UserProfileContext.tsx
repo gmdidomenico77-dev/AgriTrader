@@ -3,9 +3,11 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 
-interface UserProfile {
+export interface UserProfile {
   displayName: string;
   location: string;
+  latitude?: number;      // Optional: store lat for weather
+  longitude?: number;    // Optional: store lon for weather
   farmName: string;
   createdAt: Date;
   updatedAt: Date;
@@ -82,7 +84,7 @@ export const UserProfileProvider: React.FC<UserProfileProviderProps> = ({ childr
       await setDoc(profileRef, updatedData, { merge: true });
       
       // Update local state
-      setProfile(prev => prev ? { ...prev, ...updatedData } : null);
+      setProfile(prev => prev ? { ...prev, ...updatedData } : updatedData as UserProfile);
       return true;
     } catch (error) {
       console.error('Error updating profile:', error);
