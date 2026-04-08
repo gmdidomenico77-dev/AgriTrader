@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: agritrader-backend
+    runtime: docker
+    # Build from repo root so the Dockerfile can COPY backend/ and models/
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: PORT
+        value: "5000"
+      # Skip the slow CSV update on cold start (Render free tier has a 50s boot limit)
+      - key: SKIP_STARTUP_DATA_UPDATE
+        value: "false"
+      # Allow requests from any origin — lock this down once you have a real domain
+      - key: CORS_ORIGIN_REGEX
+        value: ".*"
+      # Optional: add your FRED API key here for live economic data
+      # - key: FRED_API_KEY
+      #   value: "your-key-here"

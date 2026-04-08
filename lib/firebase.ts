@@ -1,8 +1,12 @@
 import { initializeApp, getApps } from 'firebase/app';
-// Use React Native entrypoint for Auth so the native module is registered
-//@ts-ignore
-import { getAuth, initializeAuth, getReactNativePersistence } from 'firebase/auth';
-import { initializeFirestore, setLogLevel as setFirestoreLogLevel } from 'firebase/firestore';
+import { Platform } from 'react-native';
+import {
+  getAuth,
+  initializeAuth,
+  getReactNativePersistence,
+  browserLocalPersistence,
+} from 'firebase/auth';
+import { initializeFirestore } from 'firebase/firestore';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
@@ -16,25 +20,17 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-const authInstance = initializeAuth(app, {
-  persistence: getReactNativePersistence(ReactNativeAsyncStorage)
-
-});
-
-/*
-// Reduce Firestore log noise in dev
-setFirestoreLogLevel('warn');
-
-// Get existing Auth if already registered (avoids double init during fast refresh)
 let authInstance;
 try {
-  authInstance = getAuth(app);
-} catch {
   authInstance = initializeAuth(app, {
-    persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+    persistence:
+      Platform.OS === 'web'
+        ? browserLocalPersistence
+        : getReactNativePersistence(ReactNativeAsyncStorage),
   });
+} catch {
+  authInstance = getAuth(app);
 }
-  */
 
 export const auth = authInstance;
 

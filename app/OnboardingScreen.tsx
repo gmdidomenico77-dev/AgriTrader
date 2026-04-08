@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUserProfile } from '../components/UserProfileContext';
+import { geocodingService } from '../lib/geocodingService';
 
 interface OnboardingScreenProps {
   onComplete: (profileData: UserProfile) => void;
@@ -72,15 +73,17 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // Save profile data to Firestore
+      // Geocode the location so lat/lon are stored for accurate weather-based predictions
+      const coords = geocodingService.getCoordinates(profileData.location);
       const success = await updateProfile({
         ...profileData,
+        latitude: coords.lat,
+        longitude: coords.lon,
         createdAt: new Date(),
       });
-      
+
       if (success) {
         onComplete(profileData);
-        console.log('profile saved');
       } else {
         Alert.alert('Error', 'Failed to save profile. Please try again.');
       }

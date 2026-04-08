@@ -10,6 +10,9 @@ export interface PredictionData {
   days_ahead: number;
   timestamp: string;
   location: string;
+  fallback_used?: boolean;
+  local_bid?: number;
+  local_bid_region?: string;
   recommendation: {
     action: string;
     confidence: string;
@@ -45,23 +48,72 @@ export interface GraphData {
 // Backend API configuration
 import { API_BASE_URL } from './config';
 
+/**
+ * Location-specific price adjustment factors (mirrors Python backend location_factors).
+ * PA is the training-data baseline.  Other states adjust up/down by crop.
+ */
+const LOCATION_FACTORS: Record<string, Record<string, number>> = {
+  PA: { corn: 0.98, soybeans: 0.97, wheat: 0.99 },
+  OH: { corn: 1.02, soybeans: 1.01, wheat: 1.00 },
+  IN: { corn: 1.01, soybeans: 1.00, wheat: 0.98 },
+  IL: { corn: 1.00, soybeans: 1.00, wheat: 1.00 },
+};
+
+/** Extract supported 2-letter state code from any location string, defaulting to 'PA'. */
+function parseStateCode(location: string): string {
+  if (!location) return 'PA';
+  const s = location.trim().toUpperCase();
+  const supported = Object.keys(LOCATION_FACTORS);
+  // Exact match
+  if (supported.includes(s)) return s;
+  // "City, ST" → pull the part after the last comma
+  const afterComma = s.split(',').pop()?.trim() ?? '';
+  if (supported.includes(afterComma)) return afterComma;
+  // Full state names
+  const nameMap: Record<string, string> = {
+    PENNSYLVANIA: 'PA', OHIO: 'OH', INDIANA: 'IN', ILLINOIS: 'IL',
+  };
+  for (const [name, code] of Object.entries(nameMap)) {
+    if (s.includes(name)) return code;
+  }
+  return 'PA';
+}
+
 // For development, we'll use mock data that matches our ML model output
 // In production, this would call your backend API with the ML models
 class PredictionService {
-  
-  // ML MODEL PREDICTIONS - These are PREDICTIONS for TODAY and future!
-  // Historical data (CSV): $4.18 corn on Oct 10 → Model predicts: $4.22 today
-  // This shows the MODEL'S intelligence, not just historical data!
+  /** Bundled demo anchors (must match mockGraphData `current_price` per crop) for CSV scaling */
+  private readonly MOCK_CASH_ANCHOR: Record<string, number> = {
+    corn: 4.18,
+    soybeans: 10.22,
+    wheat: 5.06,
+  };
+
+  /**
+   * The bundled mock data was built for 'PA' location factors (0.98 corn, 0.97 soy, 0.99 wheat).
+   * When used for a different state, undo the PA factor and apply the target state factor.
+   */
+  private locationRatio(crop: string, stateCode: string): number {
+    const paFactor = LOCATION_FACTORS['PA']?.[crop] ?? 1;
+    const targetFactor = LOCATION_FACTORS[stateCode]?.[crop] ?? paFactor;
+    return targetFactor / paFactor;
+  }
+
+  private backendCheckedAt = 0;
+  private backendAvailableCache: boolean | null = null;
+  private static readonly BACKEND_CHECK_TTL_MS = 20_000;
+
   private mockPredictions: Record<string, PredictionData> = {
     'corn': {
       crop: 'corn',
-      predicted_price: 4.22,  // ML PREDICTION for today (CSV was $4.18 yesterday)
+      predicted_price: 4.22,
       confidence_lower: 4.04,
       confidence_upper: 4.40,
       model_confidence: 0.96,
       days_ahead: 1,
       timestamp: new Date().toISOString(),
       location: 'PA',
+      fallback_used: true,
       recommendation: {
         action: 'Hold',
         confidence: 'High',
@@ -75,13 +127,14 @@ class PredictionService {
     },
     'soybeans': {
       crop: 'soybeans',
-      predicted_price: 10.26,  // ML PREDICTION for today (CSV was $10.22 yesterday)
+      predicted_price: 10.26,
       confidence_lower: 10.04,
       confidence_upper: 10.48,
       model_confidence: 0.97,
       days_ahead: 1,
       timestamp: new Date().toISOString(),
       location: 'PA',
+      fallback_used: true,
       recommendation: {
         action: 'Hold',
         confidence: 'High',
@@ -95,13 +148,14 @@ class PredictionService {
     },
     'wheat': {
       crop: 'wheat',
-      predicted_price: 5.09,  // ML PREDICTION for today (CSV was $5.06 yesterday)
+      predicted_price: 5.09,
       confidence_lower: 4.91,
       confidence_upper: 5.27,
       model_confidence: 0.93,
       days_ahead: 1,
       timestamp: new Date().toISOString(),
       location: 'PA',
+      fallback_used: true,
       recommendation: {
         action: 'Hold',
         confidence: 'High',
@@ -160,30 +214,136 @@ class PredictionService {
     }
   };
 
-  // Check if backend API is available
   private async isBackendAvailable(): Promise<boolean> {
+    const now = Date.now();
+    if (
+      this.backendAvailableCache !== null &&
+      now - this.backendCheckedAt < PredictionService.BACKEND_CHECK_TTL_MS
+    ) {
+      return this.backendAvailableCache;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000); // fail fast — don't wait 20s for TCP timeout
+
     try {
-      console.log('🔍 Checking backend availability at:', API_BASE_URL);
       const response = await fetch(`${API_BASE_URL}/health`, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
       });
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('✅ Backend is available! Models loaded:', data.models_loaded);
-        return true;
-      } else {
-        console.warn('⚠️ Backend responded but not OK:', response.status);
-        return false;
-      }
-    } catch (error) {
-      console.warn('❌ Backend not available:', error);
-      console.warn('💡 Using mock data as fallback');
+      clearTimeout(timer);
+      this.backendAvailableCache = response.ok;
+      this.backendCheckedAt = now;
+      return response.ok;
+    } catch {
+      clearTimeout(timer);
+      this.backendAvailableCache = false;
+      this.backendCheckedAt = now;
       return false;
     }
+  }
+
+  private trendLabelFromSeries(prices: number[]): string {
+    if (prices.length < 2) return 'Stable';
+    const first = prices[0];
+    const last = prices[prices.length - 1];
+    if (last > first * 1.008) return 'Upward';
+    if (last < first * 0.992) return 'Downward';
+    return 'Stable';
+  }
+
+  private enrichGraphData(g: GraphData): GraphData {
+    const pts = g.data_points;
+    if (!pts.length) return g;
+    const prices = pts.map((p) => p.predicted_price);
+    const mid = prices[Math.floor(prices.length / 2)];
+    const first = prices[0];
+    const last = prices[prices.length - 1];
+    const peak = Math.max(...prices, g.current_price ?? 0);
+    const nearTerm = this.trendLabelFromSeries(prices);
+    const longTerm =
+      last > mid * 1.01 ? 'Upward' : last < mid * 0.99 ? 'Downward' : 'Stable';
+    return {
+      ...g,
+      peak_price: g.peak_price ?? peak,
+      near_term_trend: g.near_term_trend ?? nearTerm,
+      long_term_trend: g.long_term_trend ?? longTerm,
+    };
+  }
+
+  private scalePrediction(p: PredictionData, ratio: number): PredictionData {
+    if (ratio === 1) return { ...p };
+    return {
+      ...p,
+      predicted_price: Number((p.predicted_price * ratio).toFixed(2)),
+      confidence_lower: Number((p.confidence_lower * ratio).toFixed(2)),
+      confidence_upper: Number((p.confidence_upper * ratio).toFixed(2)),
+    };
+  }
+
+  private scaleGraphData(g: GraphData, ratio: number): GraphData {
+    if (ratio === 1) return { ...g };
+    return {
+      ...g,
+      current_price: Number((g.current_price * ratio).toFixed(3)),
+      data_points: g.data_points.map((p) => ({
+        ...p,
+        predicted_price: Number((p.predicted_price * ratio).toFixed(3)),
+        confidence_lower: Number((p.confidence_lower * ratio).toFixed(3)),
+        confidence_upper: Number((p.confidence_upper * ratio).toFixed(3)),
+      })),
+      peak_price: g.peak_price !== undefined ? Number((g.peak_price * ratio).toFixed(3)) : undefined,
+    };
+  }
+
+  /** Offline-only: scaled bundled data aligned to latest cash prices in data.csv */
+  private async getBundledPrediction(crop: string, location: string): Promise<PredictionData> {
+    const key = crop.toLowerCase();
+    const base = this.mockPredictions[key];
+    if (!base) {
+      throw new Error(`No bundled prediction for crop: ${crop}`);
+    }
+    const { csvDataService } = await import('./csvDataService');
+    const latest = await csvDataService.getLatestPrice(key);
+    const anchor = this.MOCK_CASH_ANCHOR[key] ?? base.predicted_price;
+    // Scale to latest CSV cash price, then adjust for the user's state
+    const csvRatio = latest > 0 && anchor > 0 ? latest / anchor : 1;
+    const stateCode = parseStateCode(location);
+    const locRatio = this.locationRatio(key, stateCode);
+    const totalRatio = csvRatio * locRatio;
+
+    const scaled = this.scalePrediction({ ...base, location }, totalRatio);
+    scaled.timestamp = new Date().toISOString();
+
+    const graph = this.mockGraphData[key];
+    const series = graph
+      ? this.scaleGraphData({ ...graph, location }, totalRatio).data_points.map((p) => p.predicted_price)
+      : [scaled.predicted_price];
+    const trend = this.trendLabelFromSeries(series);
+    return {
+      ...scaled,
+      market_analysis: {
+        ...scaled.market_analysis,
+        trend,
+      },
+    };
+  }
+
+  private async getBundledGraphData(crop: string, location: string): Promise<GraphData> {
+    const key = crop.toLowerCase();
+    const base = this.mockGraphData[key];
+    if (!base) {
+      throw new Error(`No bundled graph for crop: ${crop}`);
+    }
+    const { csvDataService } = await import('./csvDataService');
+    const latest = await csvDataService.getLatestPrice(key);
+    const anchor = this.MOCK_CASH_ANCHOR[key] ?? base.current_price;
+    const csvRatio = latest > 0 && anchor > 0 ? latest / anchor : 1;
+    const stateCode = parseStateCode(location);
+    const locRatio = this.locationRatio(key, stateCode);
+    const scaled = this.scaleGraphData({ ...base, location }, csvRatio * locRatio);
+    return this.enrichGraphData(scaled);
   }
 
   // Get prediction for a specific crop and location
@@ -193,113 +353,83 @@ class PredictionService {
     latitude?: number,
     longitude?: number,
   ): Promise<PredictionData> {
-    // Try to use real ML API first, fallback to mock data
     const isBackendReady = await this.isBackendAvailable();
-    
+
     if (isBackendReady) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000); // models can be slow on cold start
       try {
-        console.log(`📡 Fetching ML prediction for ${crop} from backend...`);
         const response = await fetch(`${API_BASE_URL}/predict/${crop}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            location: location,
-            days: 1,
-            lat: latitude,
-            lon: longitude,
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location, days: 1, lat: latitude, lon: longitude }),
+          signal: controller.signal,
         });
-        
+        clearTimeout(timer);
         if (response.ok) {
           const data = await response.json();
-          console.log(`✅ Got ML prediction for ${crop}: $${data.predicted_price?.toFixed(2)}`);
-          return data;
-        } else {
-          console.warn(`⚠️ Backend returned status ${response.status} for ${crop}`);
+          data.fallback_used = data.diagnostics?.fallback_used ?? false;
+          return data as PredictionData;
         }
-      } catch (error) {
-        console.warn('❌ Backend API request failed:', error);
+      } catch {
+        clearTimeout(timer);
+        // backend unreachable or timed out — fall through to bundled
       }
     }
-    
-    // Backend unavailable - throw error so user knows to start backend
-    console.error(`❌ Backend is not running!`);
-    console.error(`💡 To fix: Start backend with 'python app.py' in AgriTrader/backend/`);
-    
-    throw new Error('Backend server is not running. Please start the backend to get ML predictions.');
+
+    return this.getBundledPrediction(crop, location);
   }
 
   // Get graph data for chart display
-  async getGraphData(crop: string, location: string = 'PA'): Promise<GraphData> {
-    // Try to use real ML API first, fallback to mock data
+  async getGraphData(
+    crop: string,
+    location: string = 'PA',
+    latitude?: number,
+    longitude?: number,
+  ): Promise<GraphData> {
     const isBackendReady = await this.isBackendAvailable();
-    
+
     if (isBackendReady) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
       try {
-        console.log(`📊 Fetching graph data for ${crop} from backend...`);
         const response = await fetch(`${API_BASE_URL}/predict/${crop}/graph`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            location: location
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location, lat: latitude, lon: longitude }),
+          signal: controller.signal,
         });
-        
+        clearTimeout(timer);
         if (response.ok) {
-          const data = await response.json();
-          console.log(`✅ Got graph data for ${crop}`);
-          return data;
-        } else {
-          console.warn(`⚠️ Backend returned status ${response.status} for ${crop} graph`);
+          const data = (await response.json()) as GraphData;
+          return this.enrichGraphData(data);
         }
-      } catch (error) {
-        console.warn('❌ Backend graph request failed:', error);
+      } catch {
+        clearTimeout(timer);
       }
     }
-    
-    // Backend unavailable - throw error
-    console.error(`❌ Backend is not running!`);
-    console.error(`💡 To fix: Start backend with 'python app.py' in AgriTrader/backend/`);
-    
-    throw new Error('Backend server is not running. Please start the backend to get ML predictions.');
+
+    return this.getBundledGraphData(crop, location);
   }
 
-  /**
-   * Generate a deterministic "random" number based on a seed
-   * This ensures the same historical pattern is generated each day
-   */
-  private seededRandom(seed: string): number {
-    let hash = 0;
-    for (let i = 0; i < seed.length; i++) {
-      const char = seed.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return Math.abs(hash) / 2147483647; // Normalize to 0-1
-  }
-
-  // Get historical prices for the "5 days ago" part of the chart
-  // Uses REAL CSV data - NO MORE FAKE DATA!
   async getHistoricalPrices(crop: string, days: number = 5): Promise<number[]> {
-    console.log('✅ Getting REAL historical prices for', crop, 'from CSV');
-    
-    // Import csvDataService dynamically to avoid circular imports
     const { csvDataService } = await import('./csvDataService');
     return csvDataService.getRecentPrices(crop, days);
   }
 
   // Refresh predictions (for pull-to-refresh functionality)
-  async refreshPredictions(crop: string, location: string = 'PA'): Promise<{
+  async refreshPredictions(
+    crop: string,
+    location: string = 'PA',
+    latitude?: number,
+    longitude?: number,
+  ): Promise<{
     prediction: PredictionData;
     graphData: GraphData;
   }> {
     const [prediction, graphData] = await Promise.all([
-      this.getPrediction(crop, location),
-      this.getGraphData(crop, location)
+      this.getPrediction(crop, location, latitude, longitude),
+      this.getGraphData(crop, location, latitude, longitude)
     ]);
 
     return { prediction, graphData };
@@ -316,9 +446,9 @@ export const usePredictions = (crop: string) => {
 
   return {
     getPrediction: () => predictionService.getPrediction(crop, location),
-    getGraphData: () => predictionService.getGraphData(crop, location),
+    getGraphData: () => predictionService.getGraphData(crop, location, profile?.latitude, profile?.longitude),
     getHistoricalPrices: () => predictionService.getHistoricalPrices(crop),
-    refreshPredictions: () => predictionService.refreshPredictions(crop, location),
+    refreshPredictions: () => predictionService.refreshPredictions(crop, location, profile?.latitude, profile?.longitude),
     userLocation: location
   };
 };

@@ -2,36 +2,79 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sys
 import os
+import re
+from datetime import datetime, timezone
 from functools import lru_cache
 
-# Add the ML_PROJ root directory to the path to import our ML models
-# Current file is in AgriTrader/backend/app.py
-# We need to go up two levels to reach ML_PROJ
+# Resolve the ML project root directory.
+# MODELS_DIR env var allows overriding on Northflank / Docker where the directory
+# layout differs from local dev (e.g. MODELS_DIR=/app).
 current_dir = os.path.dirname(os.path.abspath(__file__))  # AgriTrader/backend
 agritrader_dir = os.path.dirname(current_dir)             # AgriTrader
-ml_proj_dir = os.path.dirname(agritrader_dir)             # ML_PROJ
+ml_proj_dir = os.getenv("MODELS_DIR", os.path.dirname(agritrader_dir))  # ML_PROJ or override
 
 sys.path.insert(0, ml_proj_dir)
+sys.path.insert(0, current_dir)
 
-# Change working directory to ML_PROJ so model files can be found
 os.chdir(ml_proj_dir)
 
 from AgriTrader_API import AgriTraderAPI
 from historical_data_fetcher import historical_fetcher
 from csv_historical_data import csv_data
 from usda_pa_grain_scraper import usda_scraper
-
-# Add daily updater for auto-updating CSV
-sys.path.insert(0, ml_proj_dir)
 from daily_data_updater import DailyDataUpdater
 
 app = Flask(__name__)
-# Configure CORS: allow local dev by default, and optionally a specific production origin
-frontend_origin = os.getenv("FRONTEND_ORIGIN")
-cors_origins = ["http://localhost:19006", "http://localhost:8081"]
-if frontend_origin:
-    cors_origins.append(frontend_origin)
-CORS(app, resources={r"/api/*": {"origins": cors_origins}})
+
+
+def _build_cors_origins():
+    """Browser origins: local dev, optional comma-separated env, and Vercel preview URL when backend runs on Vercel."""
+    origins = {
+        "http://localhost:19006",
+        "http://localhost:8081",
+        "http://127.0.0.1:19006",
+        "http://127.0.0.1:8081",
+    }
+    for env_key in ("FRONTEND_ORIGIN", "CORS_ORIGINS"):
+        raw = os.getenv(env_key, "")
+        if not raw:
+            continue
+        for part in raw.split(","):
+            o = part.strip().rstrip("/")
+            if o:
+                origins.add(o)
+    vercel_url = os.getenv("VERCEL_URL", "").strip()
+    if vercel_url:
+        if vercel_url.startswith("http://") or vercel_url.startswith("https://"):
+            origins.add(vercel_url.rstrip("/"))
+        else:
+            origins.add(f"https://{vercel_url.rstrip('/')}")
+    return sorted(origins)
+
+
+cors_origins = _build_cors_origins()
+frontend_origin = os.getenv("FRONTEND_ORIGIN") or os.getenv("CORS_ORIGINS")
+_cors_origin_pattern = os.getenv("CORS_ORIGIN_REGEX", "").strip()
+if _cors_origin_pattern:
+    CORS(
+        app,
+        resources={
+            r"/api/*": {
+                "origins": re.compile(_cors_origin_pattern),
+                "supports_credentials": False,
+            }
+        },
+    )
+else:
+    CORS(
+        app,
+        resources={
+            r"/api/*": {
+                "origins": cors_origins,
+                "supports_credentials": False,
+            }
+        },
+    )
 
 # Initialize the ML API
 api = AgriTraderAPI()
@@ -39,12 +82,15 @@ api = AgriTraderAPI()
 # Initialize data updater
 data_updater = DailyDataUpdater()
 
-# Auto-update CSV on backend startup
-print("\n[STARTUP] Checking for data updates...")
-try:
-    data_updater.run_daily_update()
-except Exception as e:
-    print(f"[WARNING] Data update failed: {e}")
+# Auto-update CSV on startup (skip on serverless / when disabled for faster cold starts)
+if os.getenv("SKIP_STARTUP_DATA_UPDATE", "").lower() not in ("1", "true", "yes"):
+    print("\n[STARTUP] Checking for data updates...")
+    try:
+        data_updater.run_daily_update()
+    except Exception as e:
+        print(f"[WARNING] Data update failed: {e}")
+else:
+    print("\n[STARTUP] SKIP_STARTUP_DATA_UPDATE set — skipping CSV update on startup.")
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -54,15 +100,39 @@ def health_check():
         'models_loaded': len(api.ml_models.models),
         'available_models': list(api.ml_models.models.keys()),
         'frontend_origin': frontend_origin,
+        'cors_origin_count': len(cors_origins),
+        'cors_regex': bool(_cors_origin_pattern),
     })
 
 ALLOWED_CROPS = {"corn", "soybeans", "wheat"}
 MAX_PREDICTION_DAYS = 30
 
 
-@lru_cache(maxsize=256)
-def _cached_prediction(crop: str, user_location: str, prediction_days: int, lat: float | None, lon: float | None):
-    """In-memory cache for predictions keyed by core inputs."""
+def _lat_lon_to_pa_region(lat: float, lon: float) -> str:
+    """Map Pennsylvania coordinates to USDA grain report region (east/central/west).
+    Boundaries are approximate county-level splits used by PA Ag Statistics.
+    """
+    # Non-PA coordinates fall back to central (most representative)
+    if not (39.5 < lat < 42.5 and -80.6 < lon < -74.7):
+        return 'central'
+    if lon > -76.5:
+        return 'east'
+    elif lon > -78.0:
+        return 'central'
+    else:
+        return 'west'
+
+
+@lru_cache(maxsize=512)
+def _cached_prediction(
+    crop: str,
+    user_location: str,
+    prediction_days: int,
+    lat: float | None,
+    lon: float | None,
+    as_of_date: str,
+):
+    """In-memory cache; as_of_date (UTC) refreshes inputs daily (weather/FRED/world)."""
     return api.predict_crop_price(
         crop=crop,
         user_location=user_location,
@@ -96,16 +166,20 @@ def predict_price(crop):
         print(f"\n[PREDICTION REQUEST] Crop: {crop}, Location: {user_location}, Days: {prediction_days}")
         print("[FETCHING] Real-time market data...")
 
-        # Use cached prediction if available for identical inputs
-        result = _cached_prediction(crop, user_location, prediction_days, lat, lon)
+        as_of = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        result = _cached_prediction(crop, user_location, prediction_days, lat, lon, as_of)
         
-        # Add real-time USDA local bids if available
+        # Add real-time USDA local bids using the user's actual PA region
         try:
-            local_bid = usda_scraper.get_local_bids(crop, 'central')
+            region = _lat_lon_to_pa_region(lat or 40.2737, lon or -76.8844)
+            local_bid = usda_scraper.get_local_bids(crop, region)
             if local_bid:
                 result['local_bid'] = local_bid['average']
+                result['local_bid_low'] = local_bid.get('low')
+                result['local_bid_high'] = local_bid.get('high')
+                result['local_bid_region'] = region
                 result['local_bid_source'] = 'USDA AMS PA Grain Report'
-                print(f"[USDA BID] {crop} local bid: ${local_bid['average']:.2f}")
+                print(f"[USDA BID] {crop} ({region} PA): ${local_bid['average']:.2f}")
         except Exception as e:
             print(f"[WARNING] Could not fetch USDA local bid: {e}")
         
@@ -153,25 +227,25 @@ def predict_price_graph(crop):
 
 @app.route('/api/predict/<crop>/historical', methods=['GET'])
 def get_historical_prices(crop):
-    """Get historical prices for chart"""
+    """Get historical prices for chart (same sources as /api/historical/<crop>)."""
     try:
-        days = request.args.get('days', 5, type=int)
-        
-        # For now, return mock historical data
-        # In production, this would fetch from your historical data source
-        historical_data = {
-            'crop': crop,
-            'prices': [
-                {'date': '2024-10-06', 'price': 6.80},
-                {'date': '2024-10-07', 'price': 6.85},
-                {'date': '2024-10-08', 'price': 6.88},
-                {'date': '2024-10-09', 'price': 6.92},
-                {'date': '2024-10-10', 'price': 6.95}
-            ]
-        }
-        
-        return jsonify(historical_data)
-        
+        days = request.args.get('days', 30, type=int)
+        days = max(1, min(days, 730))
+        location = request.args.get('location', 'PA', type=str)
+
+        prices = csv_data.get_historical_prices(crop, days, location)
+        source = "csv_data"
+        if not prices:
+            prices = historical_fetcher.get_historical_prices(crop, days, location)
+            source = "yahoo_finance"
+
+        return jsonify({
+            "crop": crop,
+            "location": location,
+            "prices": prices,
+            "days": len(prices),
+            "source": source,
+        })
     except Exception as e:
         return jsonify({
             'error': f'Historical data failed: {str(e)}'
@@ -184,20 +258,24 @@ def get_historical_data(crop):
         days = request.args.get('days', 30, type=int)
         location = request.args.get('location', 'PA', type=str)
         
+        days = max(1, min(int(days), 730))
+
         # PRIORITY 1: Use YOUR real CSV data (actual PA prices!)
         prices = csv_data.get_historical_prices(crop, days, location)
-        
+        source = "csv_data"
+
         # Fallback: If CSV fails, use Yahoo Finance
         if not prices:
             print(f"CSV data unavailable, falling back to Yahoo Finance for {crop}")
             prices = historical_fetcher.get_historical_prices(crop, days, location)
-        
+            source = "yahoo_finance"
+
         return jsonify({
             'crop': crop,
             'location': location,
             'prices': prices,
             'days': len(prices),
-            'source': 'csv_data' if prices else 'yahoo_finance'
+            'source': source,
         })
         
     except Exception as e:
@@ -213,24 +291,26 @@ def get_current_price(crop):
         
         # Get most recent price from YOUR CSV
         price = csv_data.get_latest_price(crop, location)
-        
+        source = "csv_data"
+
         # Fallback to Yahoo Finance if CSV unavailable
         if price is None:
             price = historical_fetcher.get_current_price(crop, location)
-        
+            source = "yahoo_finance"
+
         if price is None:
             return jsonify({'error': 'Could not fetch current price'}), 500
-        
+
         # Get statistics for context
         stats = csv_data.get_price_statistics(crop, days=30)
-        
+
         return jsonify({
             'crop': crop,
             'location': location,
             'current_price': price,
             'statistics': stats,
             'timestamp': 'latest_available',
-            'source': 'csv_data'
+            'source': source,
         })
         
     except Exception as e:

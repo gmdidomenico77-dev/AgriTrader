@@ -1,0 +1,2 @@
+# Static web deploy does not need the Python API tree in the upload bundle.
+backend

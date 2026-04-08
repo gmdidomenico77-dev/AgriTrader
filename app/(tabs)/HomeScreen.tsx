@@ -6,6 +6,8 @@ import { usePreorders } from "../../components/PreordersContext";
 import { useAlerts } from "../../components/AlertsContext";
 import { weatherService, WeatherData, WeatherAlert } from "../../lib/weatherService";
 import { marketPricesService, CropPrice } from "../../lib/marketPricesService";
+import { historicalDataService } from "../../lib/historicalDataService";
+import { predictionService } from "../../lib/predictionService";
 
 const HomeScreen = () => {
   const { profile } = useUserProfile();
@@ -15,12 +17,16 @@ const HomeScreen = () => {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [weatherAlerts, setWeatherAlerts] = useState<WeatherAlert[]>([]);
   const [prices, setPrices] = useState<CropPrice[]>([]);
+  const [homeForecastText, setHomeForecastText] = useState<string>(
+    "Loading market summary…",
+  );
+  const [homeModelConfidencePct, setHomeModelConfidencePct] = useState<number>(0);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [newAlert, setNewAlert] = useState({ crop: 'Corn', condition: 'above', targetPrice: '' });
 
   useEffect(() => {
     loadData();
-  }, [profile?.location]);
+  }, [profile?.location, profile?.latitude, profile?.longitude]);
 
   const loadData = async () => {
     const location = profile?.location || 'PA';
@@ -37,9 +43,33 @@ const HomeScreen = () => {
     const alerts = await weatherService.getWeatherAlerts(location);
     setWeatherAlerts(alerts);
     
-    // Load prices
-    const pricesData = await marketPricesService.getCurrentPrices();
+    const pricesData = await marketPricesService.getCurrentPrices(location);
     setPrices(pricesData);
+
+    try {
+      const [cornWeekPct, cornPred] = await Promise.all([
+        historicalDataService.getPriceChange("corn", 7),
+        predictionService.getPrediction(
+          "corn",
+          location,
+          profile?.latitude,
+          profile?.longitude,
+        ),
+      ]);
+      const dir = cornWeekPct >= 0 ? "up" : "down";
+      setHomeForecastText(
+        `Corn cash in your dataset is ${dir} ${Math.abs(cornWeekPct).toFixed(1)}% over the past week. Near-term outlook: ${cornPred.market_analysis.trend}. ${cornPred.recommendation.action}: ${cornPred.market_analysis.best_selling_time}.`,
+      );
+      setHomeModelConfidencePct(
+        Math.round((cornPred.model_confidence ?? 0) * 100),
+      );
+    } catch (e) {
+      console.warn("Home market summary:", e);
+      setHomeForecastText(
+        "Open the Forecast tab for price outlook. Summary could not be loaded.",
+      );
+      setHomeModelConfidencePct(0);
+    }
   };
 
   const handleCreateAlert = async () => {
@@ -103,7 +133,9 @@ const HomeScreen = () => {
             </View>
           </View>
         ))}
-        <Text style={styles.priceNote}>National prices from CBOT futures • Local prices are PA elevator bids</Text>
+        <Text style={styles.priceNote}>
+          Local cash from latest rows in bundled training data; national column is cash adjusted by a typical PA basis (not live CBOT).
+        </Text>
       </View>
 
       {/* Weather Alerts - Only show if there are alerts */}
@@ -152,12 +184,12 @@ const HomeScreen = () => {
       {/* Market Forecast Card */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Market Forecast Summary</Text>
-        <Text style={styles.forecastText}>
-          Corn and wheat prices showing slight upward trend. Consider listing soybeans while demand is high.
-        </Text>
+        <Text style={styles.forecastText}>{homeForecastText}</Text>
         <View style={styles.confidenceRow}>
-          <Text style={styles.confidenceLabel}>Model confidence</Text>
-          <Text style={styles.confidenceValue}>96%</Text>
+          <Text style={styles.confidenceLabel}>Model confidence (corn)</Text>
+          <Text style={styles.confidenceValue}>
+            {homeModelConfidencePct > 0 ? `${homeModelConfidencePct}%` : "—"}
+          </Text>
         </View>
       </View>
 

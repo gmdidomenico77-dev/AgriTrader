@@ -1,0 +1,140 @@
+{
+  "model_performance": {
+    "corn": {
+      "r2_score": 0.9605369200104058,
+      "mae": 0.1545306618216377,
+      "rmse": 0.19562618033013612,
+      "n_features": 20,
+      "n_samples": 620
+    },
+    "soybeans": {
+      "r2_score": 0.9747281512343877,
+      "mae": 0.1270637973926302,
+      "rmse": 0.1520966526936858,
+      "n_features": 20,
+      "n_samples": 620
+    },
+    "wheat": {
+      "r2_score": 0.9317327855097579,
+      "mae": 0.20536566787049043,
+      "rmse": 0.2643050283989132,
+      "n_features": 20,
+      "n_samples": 620
+    }
+  },
+  "feature_importance": {
+    "corn": {
+      "day_of_year": 0.6293214141694253,
+      "world_price_weighted": 0.10410045716436125,
+      "corn_world_price": 0.08585613285540429,
+      "seasonal_cos": 0.06993305636945348,
+      "seasonal_sin": 0.04065294799779785,
+      "10yr_treasury": 0.017206299761758647,
+      "gdd_weighted": 0.012647856062576361,
+      "gdd_cumulative": 0.01092704443654229,
+      "usd_eur": 0.009453320038455127,
+      "economic_weighted": 0.006566318541120171,
+      "drought_index": 0.004917448472025064,
+      "drought_weighted": 0.004367996062873074,
+      "temperature_2m_max": 0.0017074399387927406,
+      "precipitation_weighted": 0.0008337023957124165,
+      "temperature_weighted": 0.0007414391642966839,
+      "precipitation_sum": 0.0005642230172916177,
+      "wheat_world_price": 0.00016070084391266743,
+      "cpi": 3.075524664841724e-05,
+      "soy_world_price": 7.598854120015317e-06,
+      "unemployment_rate": 3.84860743257578e-06
+    },
+    "soybeans": {
+      "gdd_weighted": 0.53446005160862,
+      "gdd_cumulative": 0.3368353574381682,
+      "seasonal_sin": 0.03639019600664417,
+      "day_of_year": 0.035259053591539684,
+      "corn_world_price": 0.010615589515231194,
+      "seasonal_cos": 0.008547880587516784,
+      "drought_index": 0.008254940925187314,
+      "usd_eur": 0.006215525338242824,
+      "drought_weighted": 0.005870580008383377,
+      "wheat_world_price": 0.005033160613459776,
+      "economic_weighted": 0.004199026314865336,
+      "10yr_treasury": 0.0028174916552458546,
+      "precipitation_sum": 0.0020013949059365047,
+      "temperature_weighted": 0.0013976622408627512,
+      "temperature_2m_max": 0.0010790186935136267,
+      "precipitation_weighted": 0.0009157128748486876,
+      "cpi": 6.543865854465803e-05,
+      "soy_world_price": 3.1264761581955077e-05,
+      "unemployment_rate": 1.0393865682727708e-05,
+      "world_price_weighted": 2.603959245119772e-07
+    },
+    "wheat": {
+      "wheat_world_price": 0.2208760675338142,
+      "world_price_weighted": 0.1896257618541816,
+      "seasonal_cos": 0.10037709563631525,
+      "unemployment_rate": 0.07622667570088372,
+      "corn_world_price": 0.07384109485544176,
+      "gdd_weighted": 0.059427394235864225,
+      "seasonal_sin": 0.055219754582637226,
+      "gdd_cumulative": 0.05491229460336177,
+      "drought_index": 0.04145625510528173,
+      "usd_eur": 0.035872256808474556,
+      "drought_weighted": 0.03499282299095982,
+      "economic_weighted": 0.022262620526540773,
+      "day_of_year": 0.01555584470524739,
+      "10yr_treasury": 0.011559228319721622,
+      "cpi": 0.002666006735482849,
+      "temperature_2m_max": 0.0022777181126416844,
+      "temperature_weighted": 0.001867186006397102,
+      "precipitation_sum": 0.0005313213632785962,
+      "precipitation_weighted": 0.0003730570742923833,
+      "soy_world_price": 7.954324918172761e-05
+    }
+  },
+  "crop_weights": {
+    "corn": {
+      "temperature_2m_max": 0.25,
+      "precipitation_sum": 0.2,
+      "gdd_cumulative": 0.3,
+      "drought_index": 0.15,
+      "economic_factors": 0.1
+    },
+    "soybeans": {
+      "temperature_2m_max": 0.2,
+      "precipitation_sum": 0.25,
+      "gdd_cumulative": 0.25,
+      "drought_index": 0.2,
+      "economic_factors": 0.1
+    },
+    "wheat": {
+      "temperature_2m_max": 0.3,
+      "precipitation_sum": 0.15,
+      "gdd_cumulative": 0.2,
+      "drought_index": 0.25,
+      "economic_factors": 0.1
+    }
+  },
+  "feature_columns": [
+    "temperature_2m_max",
+    "precipitation_sum",
+    "gdd_cumulative",
+    "drought_index",
+    "10yr_treasury",
+    "unemployment_rate",
+    "cpi",
+    "usd_eur",
+    "corn_world_price",
+    "soy_world_price",
+    "wheat_world_price"
+  ],
+  "target_columns": {
+    "corn": "alt_corn_cash_price",
+    "soybeans": "alt_soybeans_cash_price",
+    "wheat": "alt_wheat_cash_price"
+  },
+  "training_date": "2026-03-29T00:58:41.052830",
+  "data_range": {
+    "start": "2024-01-01 00:00:00",
+    "end": "2025-10-10 00:00:00",
+    "n_records": 649
+  }
+}

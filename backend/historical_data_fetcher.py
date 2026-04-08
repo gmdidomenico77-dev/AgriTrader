@@ -53,18 +53,25 @@ class HistoricalDataFetcher:
                 end=end_date,
                 progress=False
             )
-            
+
             if data.empty:
                 print(f"No data returned for {crop}")
                 return self._generate_fallback_data(crop, days)
-            
+
+            if isinstance(data.columns, pd.MultiIndex):
+                data = data.droplevel(1, axis=1)
+
+            if "Close" not in data.columns:
+                print(f"No Close column for {crop}")
+                return self._generate_fallback_data(crop, days)
+
             # Process the data
             prices = []
             for date, row in data.iterrows():
-                # Convert cents/bushel to $/bushel
-                # CBOT quotes are in cents, need to divide by 100
-                close_price = float(row['Close']) / 100.0
-                
+                raw_close = float(row["Close"])
+                # Yahoo may return $/bu (typ. single digits–teens) or c/bu (tens–hundreds)
+                close_price = raw_close / 100.0 if raw_close > 35 else raw_close
+
                 # Apply location basis
                 if location in self.PA_BASIS:
                     close_price += self.PA_BASIS[crop.lower()]
