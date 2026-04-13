@@ -1,5 +1,7 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal, TextInput, KeyboardAvoidingView, Platform } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import * as Haptics from "expo-haptics";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, Switch } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useUserProfile } from "../../components/UserProfileContext";
 import { useAuth } from "../../components/AuthContext";
@@ -7,6 +9,22 @@ import { useListings } from "../../components/ListingsContext";
 import { useAlerts, PriceAlert } from "../../components/AlertsContext";
 import { usePreorders } from "../../components/PreordersContext";
 import { signOutUser } from "../../lib/authService";
+
+function useCountUp(target: number, duration = 700) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (target === 0) { setValue(0); return; }
+    let frame = 0;
+    const steps = 24;
+    const id = setInterval(() => {
+      frame++;
+      setValue(Math.round(target * (frame / steps)));
+      if (frame >= steps) clearInterval(id);
+    }, duration / steps);
+    return () => clearInterval(id);
+  }, [target]);
+  return value;
+}
 
 const ProfileScreen = () => {
   const { profile, updateProfile } = useUserProfile();
@@ -18,7 +36,13 @@ const ProfileScreen = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEarningsModal, setShowEarningsModal] = useState(false);
   const [showAlertModal, setShowAlertModal] = useState(false);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<PriceAlert | null>(null);
+  const [notifPriceAlerts, setNotifPriceAlerts] = useState(true);
+  const [notifMarketUpdates, setNotifMarketUpdates] = useState(false);
+  const [notifWeather, setNotifWeather] = useState(true);
+  const [editFocusedField, setEditFocusedField] = useState<string | null>(null);
 
   const [editFormData, setEditFormData] = useState({
     farmName: profile?.farmName || "",
@@ -32,13 +56,49 @@ const ProfileScreen = () => {
     targetPrice: "",
   });
 
+  useEffect(() => {
+    AsyncStorage.multiGet([
+      "@notif_price_alerts",
+      "@notif_market_updates",
+      "@notif_weather",
+    ]).then(pairs => {
+      const map = Object.fromEntries(pairs.map(([k, v]) => [k, v]));
+      if (map["@notif_price_alerts"] !== null) setNotifPriceAlerts(map["@notif_price_alerts"] === "true");
+      if (map["@notif_market_updates"] !== null) setNotifMarketUpdates(map["@notif_market_updates"] === "true");
+      if (map["@notif_weather"] !== null) setNotifWeather(map["@notif_weather"] === "true");
+    });
+  }, []);
+
+  const setNotif = (key: string, setter: (v: boolean) => void, value: boolean) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setter(value);
+    AsyncStorage.setItem(key, String(value));
+  };
+
   const userListings = getUserListings();
-  
+
+  const now = new Date();
+  const thisMonthEarnings = preorders
+    .filter(p => {
+      const d = new Date(p.orderedAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    })
+    .reduce((sum, p) => sum + p.pricePerUnit * p.quantity, 0);
+
+  const totalEarnings = preorders.reduce(
+    (sum, p) => sum + p.pricePerUnit * p.quantity,
+    0
+  );
+
   const summary = {
     listings: userListings.length,
     preorders: preorders.length,
-    pastSales: 23, // Mock for demo
+    pastSales: preorders.length,
   };
+
+  const animListings = useCountUp(summary.listings);
+  const animPreorders = useCountUp(summary.preorders);
+  const animPastSales = useCountUp(summary.pastSales);
 
   const handleEditProfile = () => {
     setEditFormData({
@@ -61,6 +121,7 @@ const ProfileScreen = () => {
       displayName: editFormData.displayName,
     });
 
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowEditModal(false);
     Alert.alert("Profile Updated ✓", "Your profile has been updated successfully");
   };
@@ -90,6 +151,7 @@ const ProfileScreen = () => {
       targetPrice: targetPrice,
     });
 
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowAlertModal(false);
     Alert.alert("Alert Updated ✓", "Your price alert has been updated");
   };
@@ -132,7 +194,7 @@ const ProfileScreen = () => {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
       {/* Farm Info Card */}
       <View style={styles.card}>
         <View style={styles.cardHeader}>
@@ -157,15 +219,15 @@ const ProfileScreen = () => {
         <Text style={styles.cardTitle}>Summary</Text>
         <View style={styles.summaryGrid}>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>{summary.listings}</Text>
+            <Text style={styles.summaryNumber}>{animListings}</Text>
             <Text style={styles.summaryLabel}>Listings</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>{summary.preorders}</Text>
+            <Text style={styles.summaryNumber}>{animPreorders}</Text>
             <Text style={styles.summaryLabel}>Pre-orders</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>{summary.pastSales}</Text>
+            <Text style={styles.summaryNumber}>{animPastSales}</Text>
             <Text style={styles.summaryLabel}>Past Sales</Text>
           </View>
         </View>
@@ -208,7 +270,11 @@ const ProfileScreen = () => {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Settings</Text>
 
-        <TouchableOpacity style={styles.settingItem}>
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={() => setShowNotificationsModal(true)}
+          activeOpacity={0.7}
+        >
           <View style={styles.settingLeft}>
             <Ionicons name="notifications-outline" size={24} color="#6b7280" />
             <Text style={styles.settingText}>Notifications</Text>
@@ -216,7 +282,11 @@ const ProfileScreen = () => {
           <Ionicons name="chevron-forward" size={20} color="#6b7280" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.settingItem}>
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={() => setShowHelpModal(true)}
+          activeOpacity={0.7}
+        >
           <View style={styles.settingLeft}>
             <Ionicons name="help-circle-outline" size={24} color="#6b7280" />
             <Text style={styles.settingText}>Help & Support</Text>
@@ -245,6 +315,7 @@ const ProfileScreen = () => {
             onPress={() => setShowEditModal(false)}
           />
           <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Profile</Text>
               <TouchableOpacity onPress={() => setShowEditModal(false)}>
@@ -254,25 +325,31 @@ const ProfileScreen = () => {
 
             <Text style={styles.inputLabel}>Display Name</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, editFocusedField === "displayName" && styles.inputFocused]}
               value={editFormData.displayName}
               onChangeText={(text) => setEditFormData({ ...editFormData, displayName: text })}
+              onFocus={() => setEditFocusedField("displayName")}
+              onBlur={() => setEditFocusedField(null)}
               placeholder="Your Name"
             />
 
             <Text style={styles.inputLabel}>Farm Name</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, editFocusedField === "farmName" && styles.inputFocused]}
               value={editFormData.farmName}
               onChangeText={(text) => setEditFormData({ ...editFormData, farmName: text })}
+              onFocus={() => setEditFocusedField("farmName")}
+              onBlur={() => setEditFocusedField(null)}
               placeholder="Green Valley Farm"
             />
 
             <Text style={styles.inputLabel}>Location</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, editFocusedField === "location" && styles.inputFocused]}
               value={editFormData.location}
               onChangeText={(text) => setEditFormData({ ...editFormData, location: text })}
+              onFocus={() => setEditFocusedField("location")}
+              onBlur={() => setEditFocusedField(null)}
               placeholder="PA"
             />
 
@@ -291,6 +368,7 @@ const ProfileScreen = () => {
       <Modal visible={showEarningsModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Earnings Overview</Text>
               <TouchableOpacity onPress={() => setShowEarningsModal(false)}>
@@ -299,18 +377,22 @@ const ProfileScreen = () => {
             </View>
 
             <View style={styles.earningsCard}>
-              <Text style={styles.earningsLabel}>Total Earnings (All Time)</Text>
-              <Text style={styles.earningsAmount}>$3,240</Text>
+              <Text style={styles.earningsLabel}>Total Pre-order Value</Text>
+              <Text style={styles.earningsAmount}>
+                ${totalEarnings.toFixed(2)}
+              </Text>
             </View>
 
             <View style={styles.earningsBreakdown}>
               <Text style={styles.breakdownTitle}>This Month</Text>
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Total Sales</Text>
-                <Text style={styles.breakdownValue}>$580</Text>
+                <Text style={styles.breakdownLabel}>Pre-order Value</Text>
+                <Text style={styles.breakdownValue}>
+                  ${thisMonthEarnings.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Pending Orders</Text>
+                <Text style={styles.breakdownLabel}>Total Pre-orders</Text>
                 <Text style={styles.breakdownValue}>{preorders.length}</Text>
               </View>
               <View style={styles.breakdownRow}>
@@ -320,21 +402,36 @@ const ProfileScreen = () => {
             </View>
 
             <View style={styles.earningsBreakdown}>
-              <Text style={styles.breakdownTitle}>Recent Transactions</Text>
-              <View style={styles.transactionRow}>
-                <View style={styles.transactionInfo}>
-                  <Text style={styles.transactionCrop}>Corn - 500 bu</Text>
-                  <Text style={styles.transactionDate}>Oct 10, 2025</Text>
-                </View>
-                <Text style={styles.transactionAmount}>+$2,250</Text>
-              </View>
-              <View style={styles.transactionRow}>
-                <View style={styles.transactionInfo}>
-                  <Text style={styles.transactionCrop}>Soybeans - 200 bu</Text>
-                  <Text style={styles.transactionDate}>Oct 3, 2025</Text>
-                </View>
-                <Text style={styles.transactionAmount}>+$2,040</Text>
-              </View>
+              <Text style={styles.breakdownTitle}>Pre-order History</Text>
+              {preorders.length === 0 ? (
+                <Text style={styles.emptyTransactions}>
+                  No pre-orders yet. List your crops on the marketplace to get started.
+                </Text>
+              ) : (
+                preorders
+                  .slice()
+                  .sort((a, b) => new Date(b.orderedAt).getTime() - new Date(a.orderedAt).getTime())
+                  .slice(0, 5)
+                  .map(p => (
+                    <View key={p.id} style={styles.transactionRow}>
+                      <View style={styles.transactionInfo}>
+                        <Text style={styles.transactionCrop}>
+                          {p.crop} — {p.quantity} units
+                        </Text>
+                        <Text style={styles.transactionDate}>
+                          {new Date(p.orderedAt).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </Text>
+                      </View>
+                      <Text style={styles.transactionAmount}>
+                        +${(p.pricePerUnit * p.quantity).toFixed(2)}
+                      </Text>
+                    </View>
+                  ))
+              )}
             </View>
           </View>
         </View>
@@ -352,6 +449,7 @@ const ProfileScreen = () => {
             onPress={() => setShowAlertModal(false)}
           />
           <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Price Alert</Text>
               <TouchableOpacity onPress={() => setShowAlertModal(false)}>
@@ -415,6 +513,121 @@ const ProfileScreen = () => {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      {/* Notifications Modal */}
+      <Modal visible={showNotificationsModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Notifications</Text>
+              <TouchableOpacity onPress={() => setShowNotificationsModal(false)}>
+                <Ionicons name="close" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.notifRow}>
+              <View style={styles.notifInfo}>
+                <Text style={styles.notifTitle}>Price Alerts</Text>
+                <Text style={styles.notifDesc}>Get notified when crop prices hit your targets</Text>
+              </View>
+              <Switch
+                value={notifPriceAlerts}
+                onValueChange={(v) => setNotif("@notif_price_alerts", setNotifPriceAlerts, v)}
+                trackColor={{ false: "#e5e7eb", true: "#a3d977" }}
+                thumbColor={notifPriceAlerts ? "#2d5016" : "#9ca3af"}
+              />
+            </View>
+
+            <View style={styles.notifRow}>
+              <View style={styles.notifInfo}>
+                <Text style={styles.notifTitle}>Market Updates</Text>
+                <Text style={styles.notifDesc}>Daily summary of market price movements</Text>
+              </View>
+              <Switch
+                value={notifMarketUpdates}
+                onValueChange={(v) => setNotif("@notif_market_updates", setNotifMarketUpdates, v)}
+                trackColor={{ false: "#e5e7eb", true: "#a3d977" }}
+                thumbColor={notifMarketUpdates ? "#2d5016" : "#9ca3af"}
+              />
+            </View>
+
+            <View style={styles.notifRow}>
+              <View style={styles.notifInfo}>
+                <Text style={styles.notifTitle}>Weather Alerts</Text>
+                <Text style={styles.notifDesc}>Severe weather warnings for your region</Text>
+              </View>
+              <Switch
+                value={notifWeather}
+                onValueChange={(v) => setNotif("@notif_weather", setNotifWeather, v)}
+                trackColor={{ false: "#e5e7eb", true: "#a3d977" }}
+                thumbColor={notifWeather ? "#2d5016" : "#9ca3af"}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={() => setShowNotificationsModal(false)}
+            >
+              <Text style={styles.saveButtonText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Help & Support Modal */}
+      <Modal visible={showHelpModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Help & Support</Text>
+              <TouchableOpacity onPress={() => setShowHelpModal(false)}>
+                <Ionicons name="close" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+
+            {[
+              {
+                q: "How do I post a crop listing?",
+                a: "Tap the Post Listing tab at the bottom of the screen. Fill in your crop type, quantity, price, and available date, then tap Post Listing.",
+              },
+              {
+                q: "How are price predictions generated?",
+                a: "AgriTrader uses ML models trained on USDA historical data to forecast near-term corn, soybean, and wheat prices. Predictions update based on your location.",
+              },
+              {
+                q: "What do the National vs Local prices mean?",
+                a: "National prices reflect broad market benchmarks. Local prices are regional estimates adjusted for your area's typical basis spread.",
+              },
+              {
+                q: "How do price alerts work?",
+                a: "Set a target price on the Home screen using the bell icon. AgriTrader will notify you when a crop crosses your threshold.",
+              },
+              {
+                q: "How do I update my farm location?",
+                a: "Tap the pencil icon on your Profile card. Changing your location updates all price predictions and weather data throughout the app.",
+              },
+              {
+                q: "What does Pre-Order mean?",
+                a: "Pre-ordering a listing reserves your interest in that crop. The seller will be notified and can confirm availability with you directly.",
+              },
+            ].map((item, i) => (
+              <View key={i} style={styles.faqItem}>
+                <Text style={styles.faqQuestion}>{item.q}</Text>
+                <Text style={styles.faqAnswer}>{item.a}</Text>
+              </View>
+            ))}
+
+            <TouchableOpacity
+              style={[styles.saveButton, { marginTop: 8, marginBottom: 16 }]}
+              onPress={() => setShowHelpModal(false)}
+            >
+              <Text style={styles.saveButtonText}>Close</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
     </ScrollView>
   );
 };
@@ -429,12 +642,12 @@ const styles = StyleSheet.create({
     margin: 16,
     marginBottom: 8,
     padding: 20,
-    borderRadius: 12,
+    borderRadius: 16,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
   },
   cardHeader: {
     flexDirection: "row",
@@ -554,6 +767,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "flex-end",
   },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: "#d1d5db",
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 20,
+  },
   modalContent: {
     backgroundColor: "#ffffff",
     borderTopLeftRadius: 20,
@@ -652,6 +873,55 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#1f2937",
+  },
+  inputFocused: {
+    borderColor: "#2d5016",
+    borderWidth: 2,
+  },
+  notifRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+  },
+  notifInfo: {
+    flex: 1,
+    marginRight: 16,
+  },
+  notifTitle: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#1f2937",
+    marginBottom: 2,
+  },
+  notifDesc: {
+    fontSize: 13,
+    color: "#6b7280",
+  },
+  faqItem: {
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+  },
+  faqQuestion: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#1f2937",
+    marginBottom: 6,
+  },
+  faqAnswer: {
+    fontSize: 14,
+    color: "#374151",
+    lineHeight: 20,
+  },
+  emptyTransactions: {
+    fontSize: 14,
+    color: "#9ca3af",
+    fontStyle: "italic",
+    textAlign: "center",
+    paddingVertical: 12,
   },
   transactionRow: {
     flexDirection: "row",

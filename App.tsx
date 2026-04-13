@@ -80,16 +80,17 @@ function AuthNavigator() {
       <Tab.Navigator
         screenOptions={({ route }: { route: any }) => ({
           tabBarIcon: ({ focused, color, size }: { focused: boolean; color: string; size: number }) => {
-            let iconName: keyof typeof Ionicons.glyphMap
+            if (route.name === "Add") {
+              return <Ionicons name="add-circle" size={30} color="#d97706" />
+            }
 
+            let iconName: keyof typeof Ionicons.glyphMap
             if (route.name === "Home") {
               iconName = focused ? "home" : "home-outline"
             } else if (route.name === "Forecast") {
               iconName = focused ? "trending-up" : "trending-up-outline"
             } else if (route.name === "Market") {
               iconName = focused ? "storefront" : "storefront-outline"
-            } else if (route.name === "Add") {
-              iconName = focused ? "add-circle" : "add-circle-outline"
             } else if (route.name === "Profile") {
               iconName = focused ? "person" : "person-outline"
             } else {
@@ -99,28 +100,49 @@ function AuthNavigator() {
             return <Ionicons name={iconName} size={size} color={color} />
           },
           tabBarActiveTintColor: "#2d5016",
-          tabBarInactiveTintColor: "#8e8e93",
+          tabBarInactiveTintColor: "#9ca3af",
           tabBarStyle: {
             backgroundColor: "#ffffff",
-            borderTopColor: "#e5e5e7",
-            height: 60,
-            paddingBottom: 8,
-            paddingTop: 8,
+            borderTopColor: "#f3f4f6",
+            height: 64,
+            paddingBottom: 10,
+            paddingTop: 6,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: -3 },
+            shadowOpacity: 0.06,
+            shadowRadius: 10,
+            elevation: 12,
+          },
+          tabBarLabelStyle: {
+            fontSize: 11,
+            fontWeight: "600",
+            letterSpacing: 0.2,
           },
           headerStyle: {
             backgroundColor: "#2d5016",
+            shadowColor: "transparent",
+            elevation: 0,
           },
           headerTintColor: "#ffffff",
           headerTitleStyle: {
-            fontWeight: "600",
+            fontWeight: "700",
             fontSize: 18,
+            letterSpacing: 0.3,
           },
         })}
       >
         <Tab.Screen name="Home" component={HomeScreen} options={{ title: "AgriTrader" }} />
         <Tab.Screen name="Forecast" component={ForecastScreen} options={{ title: "Price Forecast" }} />
         <Tab.Screen name="Market" component={MarketplaceScreen} options={{ title: "Marketplace" }} />
-        <Tab.Screen name="Add" component={AddListingScreen} options={{ title: "Add Listing" }} />
+        <Tab.Screen
+          name="Add"
+          component={AddListingScreen}
+          options={{
+            title: "Post Crop",
+            tabBarActiveTintColor: "#d97706",
+            tabBarInactiveTintColor: "#d97706",
+          }}
+        />
         <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       </Tab.Navigator>
     </NavigationContainer>

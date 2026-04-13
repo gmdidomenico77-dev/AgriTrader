@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as Haptics from 'expo-haptics';
 import {
   View,
   Text,
@@ -22,6 +23,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onSwitchToReg
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -34,8 +36,10 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onSwitchToReg
     setLoading(false);
 
     if (result.success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onLoginSuccess();
     } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Login Failed', result.error);
     }
   };
@@ -55,35 +59,40 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onSwitchToReg
         </View>
 
         <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+          <View style={[styles.inputContainer, focusedField === 'email' && styles.inputContainerFocused]}>
+            <Ionicons name="mail-outline" size={20} color={focusedField === 'email' ? '#2d5016' : '#6b7280'} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Email"
               value={email}
               onChangeText={setEmail}
+              onFocus={() => setFocusedField('email')}
+              onBlur={() => setFocusedField(null)}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
             />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+          <View style={[styles.inputContainer, focusedField === 'password' && styles.inputContainerFocused]}>
+            <Ionicons name="lock-closed-outline" size={20} color={focusedField === 'password' ? '#2d5016' : '#6b7280'} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Password"
               value={password}
               onChangeText={setPassword}
+              onFocus={() => setFocusedField('password')}
+              onBlur={() => setFocusedField(null)}
               secureTextEntry
               autoCapitalize="none"
             />
           </View>
 
-          <TouchableOpacity 
-            style={[styles.loginButton, loading && styles.loginButtonDisabled]} 
+          <TouchableOpacity
+            style={[styles.loginButton, loading && styles.loginButtonDisabled]}
             onPress={handleLogin}
             disabled={loading}
+            activeOpacity={0.85}
           >
             <Text style={styles.loginButtonText}>
               {loading ? 'Signing In...' : 'Sign In'}
@@ -96,7 +105,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onSwitchToReg
             <View style={styles.dividerLine} />
           </View>
 
-          <TouchableOpacity style={styles.registerButton} onPress={onSwitchToRegister}>
+          <TouchableOpacity style={styles.registerButton} onPress={onSwitchToRegister} activeOpacity={0.85}>
             <Text style={styles.registerButtonText}>Create New Account</Text>
           </TouchableOpacity>
         </View>
@@ -157,6 +166,15 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderWidth: 1,
     borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  inputContainerFocused: {
+    borderColor: '#2d5016',
+    borderWidth: 2,
   },
   inputIcon: {
     marginRight: 12,

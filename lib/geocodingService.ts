@@ -93,6 +93,23 @@ class GeocodingService {
     this.locationMap[name.toLowerCase()] = { lat, lon, city, state };
   }
 
+  isKnownLocation(location: string): boolean {
+    const normalized = location.toLowerCase().trim().replace(/\s+/g, ' ');
+    if (this.locationMap[normalized]) return true;
+    const cityPart = normalized.split(',')[0]?.trim() ?? normalized;
+    if (cityPart && this.locationMap[cityPart]) return true;
+    for (const [key] of Object.entries(this.locationMap)) {
+      if (STATE_ABBREV_KEYS.has(key)) {
+        if (this.stateAbbrevMatchesLocation(normalized, key)) return true;
+        continue;
+      }
+      if (normalized.includes(key) || key.includes(normalized) || cityPart.includes(key) || key.includes(cityPart)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   getAvailableLocations(): string[] {
     return Object.keys(this.locationMap);
   }

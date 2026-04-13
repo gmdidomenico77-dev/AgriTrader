@@ -1,5 +1,10 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager } from "react-native";
+import * as Haptics from "expo-haptics";
+
+if (Platform.OS === 'android') {
+  UIManager.setLayoutAnimationEnabledExperimental?.(true);
+}
 import { Ionicons } from "@expo/vector-icons";
 import { usePreorders } from "../../components/PreordersContext";
 import { useListings } from "../../components/ListingsContext";
@@ -20,103 +25,44 @@ interface Listing {
 const MarketplaceScreen = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("All");
-  const [showMessageModal, setShowMessageModal] = useState(false);
-  const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
-  const [message, setMessage] = useState("");
 
-  const { preorders, addPreorder, isPreordered } = usePreorders();
+  const { addPreorder, isPreordered } = usePreorders();
   const { listings: userListings } = useListings();
+  const [preorderingId, setPreorderingId] = useState<string | null>(null);
 
   const filters = ["All", "Corn", "Soybeans", "Wheat", "Other"];
 
-  // Mock marketplace listings with realistic prices
-  const mockListings: Listing[] = [
-    {
-      id: "1",
-      crop: "Corn",
-      quantity: "500 bu",
-      price: "$4.45/bu",
-      pricePerUnit: 4.45,
-      location: "Erie, PA",
-      seller: "John's Farm",
-      availableDate: "Nov 15",
-      quality: "Grade 1",
-    },
-    {
-      id: "2",
-      crop: "Soybeans",
-      quantity: "300 bu",
-      price: "$10.15/bu",
-      pricePerUnit: 10.15,
-      location: "Pittsburgh, PA",
-      seller: "Green Valley Farms",
-      availableDate: "Nov 12",
-      quality: "Grade 1",
-    },
-    {
-      id: "3",
-      crop: "Wheat",
-      quantity: "400 bu",
-      price: "$4.95/bu",
-      pricePerUnit: 4.95,
-      location: "Harrisburg, PA",
-      seller: "Sunrise Farm Co",
-      availableDate: "Nov 10",
-      quality: "Grade 2",
-    },
-    {
-      id: "4",
-      crop: "Corn",
-      quantity: "750 bu",
-      price: "$4.50/bu",
-      pricePerUnit: 4.50,
-      location: "Lancaster, PA",
-      seller: "Miller's Grain",
-      availableDate: "Nov 18",
-      quality: "Grade 1",
-    },
-    {
-      id: "5",
-      crop: "Apples",
-      quantity: "200 lbs",
-      price: "$1.25/lb",
-      pricePerUnit: 1.25,
-      location: "Gettysburg, PA",
-      seller: "Orchard Valley",
-      availableDate: "Oct 25",
-      quality: "Premium",
-    },
-    {
-      id: "6",
-      crop: "Milk",
-      quantity: "50 gal",
-      price: "$3.50/gal",
-      pricePerUnit: 3.50,
-      location: "State College, PA",
-      seller: "Happy Cow Dairy",
-      availableDate: "Daily",
-    },
-  ];
+  const allListings: Listing[] = userListings.map(listing => ({
+    id: listing.id,
+    crop: listing.crop,
+    quantity: `${listing.quantity} units`,
+    price: `$${listing.pricePerUnit.toFixed(2)}/unit`,
+    pricePerUnit: listing.pricePerUnit,
+    location: listing.location,
+    seller: "You",
+    availableDate: new Date(listing.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    isUserListing: true,
+  }));
 
-  // Combine mock listings with user listings
-  const allListings = [
-    ...mockListings,
-    ...userListings.map(listing => ({
-      id: listing.id,
-      crop: listing.crop,
-      quantity: `${listing.quantity} units`,
-      price: `$${listing.pricePerUnit.toFixed(2)}/unit`,
-      pricePerUnit: listing.pricePerUnit,
-      location: listing.location,
-      seller: "You",
-      availableDate: "Now",
-      isUserListing: true,
-    }))
-  ];
+  const searchFiltered = searchQuery.trim()
+    ? allListings.filter(l =>
+        l.crop.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        l.location.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : allListings;
 
   const filteredListings = selectedFilter === "All"
-    ? allListings
-    : allListings.filter((listing) => listing.crop === selectedFilter);
+    ? searchFiltered
+    : searchFiltered.filter((listing) => listing.crop === selectedFilter);
+
+  const applyFilter = (filter: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setSelectedFilter(filter);
+  };
+
+  const myListings = filteredListings.filter(l => l.isUserListing);
+  const otherListings = filteredListings.filter(l => !l.isUserListing);
 
   const handlePreorder = async (listing: Listing) => {
     if (isPreordered(listing.id)) {
@@ -124,40 +70,21 @@ const MarketplaceScreen = () => {
       return;
     }
 
-    await addPreorder({
-      listingId: listing.id,
-      crop: listing.crop,
-      quantity: parseInt(listing.quantity),
-      pricePerUnit: listing.pricePerUnit,
-      seller: listing.seller,
-      location: listing.location,
-    });
-
-    Alert.alert("Pre-order Confirmed!", `You've pre-ordered ${listing.crop} from ${listing.seller}`);
-  };
-
-  const handleMessageSeller = (listing: Listing) => {
-    setSelectedListing(listing);
-    setShowMessageModal(true);
-  };
-
-  const sendMessage = () => {
-    if (!message.trim()) {
-      Alert.alert("Empty Message", "Please enter a message");
-      return;
+    setPreorderingId(listing.id);
+    try {
+      await addPreorder({
+        listingId: listing.id,
+        crop: listing.crop,
+        quantity: parseInt(listing.quantity),
+        pricePerUnit: listing.pricePerUnit,
+        seller: listing.seller,
+        location: listing.location,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Pre-order Confirmed!", `You've pre-ordered ${listing.crop} from ${listing.seller}`);
+    } finally {
+      setPreorderingId(null);
     }
-
-    setShowMessageModal(false);
-    setMessage("");
-    
-    // Show confirmation
-    setTimeout(() => {
-      Alert.alert(
-        "Message Sent ✓",
-        `Your message has been sent to ${selectedListing?.seller}. They'll respond within 24 hours.`,
-        [{ text: "OK" }]
-      );
-    }, 300);
   };
 
   return (
@@ -181,7 +108,8 @@ const MarketplaceScreen = () => {
           <TouchableOpacity
             key={filter}
             style={[styles.filterButton, selectedFilter === filter && styles.filterButtonActive]}
-            onPress={() => setSelectedFilter(filter)}
+            onPress={() => applyFilter(filter)}
+            activeOpacity={0.7}
           >
             <Text style={[styles.filterButtonText, selectedFilter === filter && styles.filterButtonTextActive]}>
               {filter}
@@ -191,102 +119,61 @@ const MarketplaceScreen = () => {
       </ScrollView>
 
       {/* Listings */}
-      <ScrollView style={styles.listingsContainer}>
+      <ScrollView style={styles.listingsContainer} contentContainerStyle={styles.listingsContent}>
         {/* My Listings Section */}
-        {userListings.length > 0 && (
+        {myListings.length > 0 && (
           <>
-            <Text style={styles.sectionTitle}>My Listings ({userListings.length})</Text>
-            {filteredListings
-              .filter(l => l.isUserListing)
-              .map((listing) => (
-                <ListingCard
-                  key={listing.id}
-                  listing={listing}
-                  isPreordered={false}
-                  onPreorder={() => {}}
-                  onMessage={() => {}}
-                  isUserListing
-                />
-              ))}
+            <Text style={styles.sectionTitle}>My Listings ({myListings.length})</Text>
+            {myListings.map((listing) => (
+              <ListingCard
+                key={listing.id}
+                listing={listing}
+                isPreordered={false}
+                onPreorder={() => {}}
+                isUserListing
+              />
+            ))}
           </>
         )}
 
-        <Text style={styles.sectionTitle}>
-          {userListings.length > 0 ? "Marketplace" : "Available Listings"}
-        </Text>
+        <Text style={styles.sectionTitle}>Marketplace</Text>
 
-        {filteredListings
-          .filter(l => !l.isUserListing)
-          .map((listing) => (
+        {otherListings.length > 0 ? (
+          otherListings.map((listing) => (
             <ListingCard
               key={listing.id}
               listing={listing}
               isPreordered={isPreordered(listing.id)}
+              isPreordering={preorderingId === listing.id}
               onPreorder={() => handlePreorder(listing)}
-              onMessage={() => handleMessageSeller(listing)}
             />
-          ))}
-      </ScrollView>
-
-      {/* Message Seller Modal */}
-      <Modal visible={showMessageModal} transparent animationType="slide">
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.modalOverlay}
-        >
-          <TouchableOpacity 
-            style={{ flex: 1 }} 
-            activeOpacity={1} 
-            onPress={() => setShowMessageModal(false)}
-          />
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Message {selectedListing?.seller}</Text>
-              <TouchableOpacity onPress={() => setShowMessageModal(false)}>
-                <Ionicons name="close" size={24} color="#6b7280" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.listingPreview}>
-              <Text style={styles.previewCrop}>{selectedListing?.crop}</Text>
-              <Text style={styles.previewDetails}>
-                {selectedListing?.quantity} • {selectedListing?.price}
-              </Text>
-            </View>
-
-            <TextInput
-              style={styles.messageInput}
-              placeholder="Type your message here..."
-              value={message}
-              onChangeText={setMessage}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-
-            <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
-              <Text style={styles.sendButtonText}>Send Message</Text>
-              <Ionicons name="send" size={16} color="#ffffff" />
-            </TouchableOpacity>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Ionicons name="storefront-outline" size={48} color="#d1d5db" />
+            <Text style={styles.emptyTitle}>No listings yet</Text>
+            <Text style={styles.emptySubtitle}>
+              When other farmers post crops for sale, they'll appear here. Use the{" "}
+              <Text style={styles.emptyHighlight}>+ Post Listing</Text> tab to list your own crops.
+            </Text>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        )}
+      </ScrollView>
     </View>
   );
 };
 
-// Separate ListingCard component for cleaner code
 const ListingCard = ({
   listing,
   isPreordered,
+  isPreordering = false,
   onPreorder,
-  onMessage,
   isUserListing = false,
 }: {
   listing: Listing;
   isPreordered: boolean;
+  isPreordering?: boolean;
   onPreorder: () => void;
-  onMessage: () => void;
   isUserListing?: boolean;
 }) => (
   <View style={[styles.listingCard, isUserListing && styles.userListingCard]}>
@@ -295,7 +182,7 @@ const ListingCard = ({
         <Text style={styles.userListingText}>YOUR LISTING</Text>
       </View>
     )}
-    
+
     <View style={styles.listingHeader}>
       <View>
         <Text style={styles.cropName}>{listing.crop}</Text>
@@ -319,27 +206,30 @@ const ListingCard = ({
       </View>
       <View style={styles.detailRow}>
         <Ionicons name="calendar-outline" size={16} color="#6b7280" />
-        <Text style={styles.detailText}>Available {listing.availableDate}</Text>
+        <Text style={styles.detailText}>Listed {listing.availableDate}</Text>
       </View>
     </View>
 
     <View style={styles.listingFooter}>
       <Text style={styles.price}>{listing.price}</Text>
       {!isUserListing && (
-        <View style={styles.actionButtons}>
-          <TouchableOpacity
-            style={[styles.preOrderButton, isPreordered && styles.preOrderButtonPressed]}
-            onPress={onPreorder}
-            disabled={isPreordered}
-          >
+        <TouchableOpacity
+          style={[
+            styles.preOrderButton,
+            (isPreordered || isPreordering) && styles.preOrderButtonPressed,
+          ]}
+          onPress={onPreorder}
+          disabled={isPreordered || isPreordering}
+          activeOpacity={0.75}
+        >
+          {isPreordering ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
             <Text style={styles.preOrderText}>
               {isPreordered ? "Pre-ordered ✓" : "Pre-Order"}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.messageButton} onPress={onMessage}>
-            <Ionicons name="chatbubble-outline" size={16} color="#6b7280" />
-          </TouchableOpacity>
-        </View>
+          )}
+        </TouchableOpacity>
       )}
     </View>
   </View>
@@ -397,6 +287,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  listingsContent: {
+    paddingBottom: 32,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: "600",
@@ -406,14 +299,14 @@ const styles = StyleSheet.create({
   },
   listingCard: {
     backgroundColor: "#ffffff",
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
   },
   userListingCard: {
     borderWidth: 2,
@@ -483,9 +376,27 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#2d5016",
   },
-  actionButtons: {
-    flexDirection: "row",
-    gap: 8,
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: "#9ca3af",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  emptyHighlight: {
+    color: "#2d5016",
+    fontWeight: "600",
   },
   preOrderButton: {
     backgroundColor: "#2d5016",
@@ -500,77 +411,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#ffffff",
-  },
-  messageButton: {
-    backgroundColor: "#f3f4f6",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: "#ffffff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    paddingBottom: 40,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: "#1f2937",
-  },
-  listingPreview: {
-    backgroundColor: "#f3f4f6",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  previewCrop: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#1f2937",
-  },
-  previewDetails: {
-    fontSize: 14,
-    color: "#6b7280",
-    marginTop: 2,
-  },
-  messageInput: {
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: "#1f2937",
-    minHeight: 100,
-    marginBottom: 16,
-  },
-  sendButton: {
-    backgroundColor: "#2d5016",
-    padding: 16,
-    borderRadius: 8,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 8,
-  },
-  sendButtonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
   },
 });
 

@@ -36,3 +36,37 @@ recommendations, and buy/sell crops with other users on the marketplace.
 - Won Congressional App Challenge PA-16 with this app
 - Target users are local farmers — UI should feel approachable, not overly technical
 - Presenting live at House of Code, D.C. — app needs to look polished and work reliably
+
+## UI/UX Design Direction
+
+### Aesthetic Goal
+Modern agricultural fintech feel — data-dense but approachable. 
+Think Bloomberg Terminal meets a clean consumer app. 
+Professional enough for a congressional presentation, 
+intuitive enough for a local farmer with no tech background.
+
+### Design Principles
+- Every static element should have a reason to be static — default to animation
+- Data should feel alive: charts animate on load, numbers count up, prices pulse on update
+- Color palette: deep greens, earthy ambers, clean whites — avoid generic blues
+- Typography: use a distinctive display font for headers, clean sans-serif for data
+- Cards should have depth (subtle shadows, hover states, micro-interactions)
+- Mobile-responsive — assume the user is on their phone in a field
+
+### Component Priorities (in order)
+1. Price forecast chart — needs smooth animations, real-time feel
+2. Dashboard header/hero — first impression, needs to wow
+3. Marketplace listings — should feel like a modern e-commerce card grid
+4. Navigation — clean, intuitive, modern
+5. Data tables — readable, sortable, not boring
+
+### What to Avoid
+- Purple gradients on white (generic AI look)
+- Inter/Roboto fonts (overused)
+- Flat static cards with no interaction
+- Generic dashboard templates that look like every SaaS app
+
+### Reference Aesthetic
+- Linear.app (clean, fast, modern)
+- Stripe Dashboard (data-rich but beautiful)
+- Robinhood (financial data made approachable)

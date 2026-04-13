@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, Animated, RefreshControl } from "react-native";
+import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useUserProfile } from "../../components/UserProfileContext";
 import { usePreorders } from "../../components/PreordersContext";
@@ -13,7 +14,7 @@ const HomeScreen = () => {
   const { profile } = useUserProfile();
   const { preorders } = usePreorders();
   const { addAlert } = useAlerts();
-  
+
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [weatherAlerts, setWeatherAlerts] = useState<WeatherAlert[]>([]);
   const [prices, setPrices] = useState<CropPrice[]>([]);
@@ -23,12 +24,48 @@ const HomeScreen = () => {
   const [homeModelConfidencePct, setHomeModelConfidencePct] = useState<number>(0);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [newAlert, setNewAlert] = useState({ crop: 'Corn', condition: 'above', targetPrice: '' });
+  const [forecastError, setForecastError] = useState(false);
+  const [priceFocused, setPriceFocused] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Entrance animations
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const card1Anim = useRef(new Animated.Value(0)).current;
+  const card2Anim = useRef(new Animated.Value(0)).current;
+  const card3Anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(headerAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.stagger(100, [
+        Animated.spring(card1Anim, { toValue: 1, tension: 50, friction: 9, useNativeDriver: true }),
+        Animated.spring(card2Anim, { toValue: 1, tension: 50, friction: 9, useNativeDriver: true }),
+        Animated.spring(card3Anim, { toValue: 1, tension: 50, friction: 9, useNativeDriver: true }),
+      ]),
+    ]).start();
+  }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
+
+  const cardStyle = (anim: Animated.Value) => ({
+    opacity: anim,
+    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+  });
 
   useEffect(() => {
     loadData();
   }, [profile?.location, profile?.latitude, profile?.longitude]);
 
   const loadData = async () => {
+    setForecastError(false);
     const location = profile?.location || 'PA';
     
     // Load weather - pass user's coordinates if available
@@ -66,9 +103,10 @@ const HomeScreen = () => {
     } catch (e) {
       console.warn("Home market summary:", e);
       setHomeForecastText(
-        "Open the Forecast tab for price outlook. Summary could not be loaded.",
+        "Market summary could not be loaded. Tap Retry or open the Forecast tab for price predictions.",
       );
       setHomeModelConfidencePct(0);
+      setForecastError(true);
     }
   };
 
@@ -85,28 +123,63 @@ const HomeScreen = () => {
       targetPrice: targetPrice
     });
 
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowAlertModal(false);
     setNewAlert({ crop: 'Corn', condition: 'above', targetPrice: '' });
     Alert.alert('Alert Created', `You'll be notified when ${newAlert.crop} goes ${newAlert.condition} $${targetPrice}`);
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor="#2d5016"
+          colors={["#2d5016"]}
+        />
+      }
+    >
       {/* Header with Weather */}
-      <View style={styles.header}>
+      <Animated.View
+        style={[
+          styles.header,
+          {
+            opacity: headerAnim,
+            transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
+          },
+        ]}
+      >
         <Text style={styles.greeting}>
           Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}
           {profile?.displayName ? `, ${profile.displayName}` : ''}!
         </Text>
-        <View style={styles.weatherRow}>
-          <Ionicons name="location-outline" size={16} color="#a3d977" />
+        <TouchableOpacity
+          style={styles.weatherRow}
+          onPress={() => {
+            if (weather) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              Alert.alert(
+                `Weather — ${profile?.location || 'PA'}`,
+                `${weather.description || 'Clear'}\n\nTemperature: ${weather.temp || '--'}°F\nFeels like: ${weather.feelsLike ?? weather.temp ?? '--'}°F\nHumidity: ${weather.humidity ?? '--'}%\nWind: ${weather.windSpeed ?? '--'} mph`,
+                [{ text: 'Close' }]
+              );
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="location-outline" size={16} color="rgba(255,255,255,0.75)" />
           <Text style={styles.location}>
             {profile?.location || 'PA'} • {weather?.description || 'Loading...'} • {weather?.temp || '--'}°F
           </Text>
-        </View>
-      </View>
+          <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.5)" style={{ marginLeft: 2 }} />
+        </TouchableOpacity>
+      </Animated.View>
 
       {/* Current Prices Card - National vs Local */}
+      <Animated.View style={cardStyle(card1Anim)}>
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>Current Prices</Text>
@@ -134,64 +207,78 @@ const HomeScreen = () => {
           </View>
         ))}
         <Text style={styles.priceNote}>
-          Local cash from latest rows in bundled training data; national column is cash adjusted by a typical PA basis (not live CBOT).
+          Regional price estimates from market data. See the Forecast tab for AI-powered predictions.
         </Text>
       </View>
+      </Animated.View>
 
       {/* Weather Alerts - Only show if there are alerts */}
       {weatherAlerts.length > 0 && weatherAlerts.map((alert, index) => (
-        <TouchableOpacity 
-          key={index} 
-          style={[
-            styles.card, 
-            styles.alertCard,
-            { borderLeftColor: alert.type === 'severe' ? '#ef4444' : alert.type === 'warning' ? '#f59e0b' : '#3b82f6' }
-          ]}
-        >
-          <View style={styles.alertHeader}>
-            <Ionicons 
-              name={alert.type === 'severe' ? "warning" : alert.type === 'warning' ? "alert-circle" : "information-circle"} 
-              size={24} 
-              color={alert.type === 'severe' ? '#ef4444' : alert.type === 'warning' ? '#f59e0b' : '#3b82f6'} 
-            />
-            <Text style={styles.alertTitle}>{alert.title}</Text>
-          </View>
-          <Text style={styles.alertText}>{alert.description}</Text>
-        </TouchableOpacity>
+        <Animated.View key={index} style={cardStyle(card2Anim)}>
+          <TouchableOpacity
+            style={[
+              styles.card,
+              styles.alertCard,
+              { borderLeftColor: alert.type === 'severe' ? '#ef4444' : alert.type === 'warning' ? '#f59e0b' : '#3b82f6' }
+            ]}
+            activeOpacity={0.85}
+          >
+            <View style={styles.alertHeader}>
+              <Ionicons
+                name={alert.type === 'severe' ? "warning" : alert.type === 'warning' ? "alert-circle" : "information-circle"}
+                size={24}
+                color={alert.type === 'severe' ? '#ef4444' : alert.type === 'warning' ? '#f59e0b' : '#3b82f6'}
+              />
+              <Text style={styles.alertTitle}>{alert.title}</Text>
+            </View>
+            <Text style={styles.alertText}>{alert.description}</Text>
+          </TouchableOpacity>
+        </Animated.View>
       ))}
 
       {/* Preorders Summary */}
       {preorders.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>My Preorders ({preorders.length})</Text>
-          {preorders.slice(0, 3).map((order) => (
-            <View key={order.id} style={styles.preorderRow}>
-              <Ionicons name="cart-outline" size={20} color="#2d5016" />
-              <View style={styles.preorderInfo}>
-                <Text style={styles.preorderCrop}>{order.crop}</Text>
-                <Text style={styles.preorderDetails}>
-                  {order.quantity} units @ ${order.pricePerUnit}/unit from {order.seller}
-                </Text>
+        <Animated.View style={cardStyle(card2Anim)}>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>My Preorders ({preorders.length})</Text>
+            {preorders.slice(0, 3).map((order) => (
+              <View key={order.id} style={styles.preorderRow}>
+                <Ionicons name="cart-outline" size={20} color="#2d5016" />
+                <View style={styles.preorderInfo}>
+                  <Text style={styles.preorderCrop}>{order.crop}</Text>
+                  <Text style={styles.preorderDetails}>
+                    {order.quantity} units @ ${order.pricePerUnit}/unit from {order.seller}
+                  </Text>
+                </View>
               </View>
-            </View>
-          ))}
-          {preorders.length > 3 && (
-            <Text style={styles.moreText}>+{preorders.length - 3} more preorders</Text>
-          )}
-        </View>
+            ))}
+            {preorders.length > 3 && (
+              <Text style={styles.moreText}>+{preorders.length - 3} more preorders</Text>
+            )}
+          </View>
+        </Animated.View>
       )}
 
       {/* Market Forecast Card */}
-      <View style={styles.card}>
+      <Animated.View style={cardStyle(card3Anim)}>
+      <View style={[styles.card, { marginBottom: 24 }]}>
         <Text style={styles.cardTitle}>Market Forecast Summary</Text>
         <Text style={styles.forecastText}>{homeForecastText}</Text>
-        <View style={styles.confidenceRow}>
-          <Text style={styles.confidenceLabel}>Model confidence (corn)</Text>
-          <Text style={styles.confidenceValue}>
-            {homeModelConfidencePct > 0 ? `${homeModelConfidencePct}%` : "—"}
-          </Text>
-        </View>
+        {forecastError ? (
+          <TouchableOpacity style={styles.retryButton} onPress={loadData} activeOpacity={0.75}>
+            <Ionicons name="refresh-outline" size={16} color="#2d5016" />
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.confidenceRow}>
+            <Text style={styles.confidenceLabel}>Model confidence (corn)</Text>
+            <Text style={styles.confidenceValue}>
+              {homeModelConfidencePct > 0 ? `${homeModelConfidencePct}%` : "—"}
+            </Text>
+          </View>
+        )}
       </View>
+      </Animated.View>
 
       {/* Create Price Alert Modal */}
       <Modal visible={showAlertModal} transparent animationType="slide">
@@ -205,6 +292,7 @@ const HomeScreen = () => {
             onPress={() => setShowAlertModal(false)}
           />
           <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Create Price Alert</Text>
               <TouchableOpacity onPress={() => setShowAlertModal(false)}>
@@ -249,9 +337,11 @@ const HomeScreen = () => {
 
             <Text style={styles.inputLabel}>Target Price ($/bushel)</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, priceFocused && styles.inputFocused]}
               value={newAlert.targetPrice}
               onChangeText={(text) => setNewAlert({ ...newAlert, targetPrice: text })}
+              onFocus={() => setPriceFocused(true)}
+              onBlur={() => setPriceFocused(false)}
               placeholder="4.50"
               keyboardType="decimal-pad"
             />
@@ -287,20 +377,24 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   location: {
-    fontSize: 16,
-    color: "#a3d977",
+    fontSize: 15,
+    color: "rgba(255,255,255,0.82)",
+    marginLeft: 4,
+  },
+  scrollContent: {
+    paddingBottom: 32,
   },
   card: {
     backgroundColor: "#ffffff",
     margin: 16,
     marginBottom: 8,
     padding: 20,
-    borderRadius: 12,
+    borderRadius: 16,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
   },
   cardHeader: {
     flexDirection: "row",
@@ -505,6 +599,35 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 16,
     color: "#1f2937",
+  },
+  inputFocused: {
+    borderColor: "#2d5016",
+    borderWidth: 2,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: "#d1d5db",
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 20,
+  },
+  retryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#2d5016",
+    marginTop: 4,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2d5016",
   },
   createButton: {
     backgroundColor: "#2d5016",

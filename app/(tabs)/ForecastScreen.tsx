@@ -221,10 +221,16 @@ const ForecastScreen = () => {
       {/* Offline / fallback banner */}
       {isUsingFallback && (
         <View style={styles.fallbackBanner}>
-          <Ionicons name="information-circle-outline" size={16} color="#92400e" />
-          <Text style={styles.fallbackText}>
-            Using offline estimates — connect to live model for real-time data
-          </Text>
+          <View style={styles.fallbackLeft}>
+            <Ionicons name="cloud-offline-outline" size={18} color="#b45309" />
+            <View>
+              <Text style={styles.fallbackTitle}>Using Cached Estimates</Text>
+              <Text style={styles.fallbackText}>Live model unavailable — predictions may vary from current market</Text>
+            </View>
+          </View>
+          <TouchableOpacity onPress={loadPredictionData} style={styles.fallbackRetry} activeOpacity={0.75}>
+            <Ionicons name="refresh-outline" size={16} color="#b45309" />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -439,18 +445,44 @@ const styles = StyleSheet.create({
   fallbackBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "#fef3c7",
-    borderBottomWidth: 1,
-    borderBottomColor: "#fde68a",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    justifyContent: "space-between",
+    backgroundColor: "#fffbeb",
+    borderLeftWidth: 4,
+    borderLeftColor: "#d97706",
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  fallbackLeft: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    flex: 1,
+  },
+  fallbackTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#92400e",
+    marginBottom: 2,
   },
   fallbackText: {
-    flex: 1,
     fontSize: 12,
-    color: "#92400e",
+    color: "#b45309",
     lineHeight: 16,
+  },
+  fallbackRetry: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: "#fde68a",
+    marginLeft: 8,
   },
   cropSelector: {
     flexDirection: "row",
@@ -523,12 +555,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     padding: 20,
-    borderRadius: 14,
+    borderRadius: 16,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
   },
   chartHeader: {
     flexDirection: "row",

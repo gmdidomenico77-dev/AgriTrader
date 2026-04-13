@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as Haptics from 'expo-haptics';
 import {
   View,
   Text,
@@ -23,6 +24,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegisterSuccess, onSw
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const handleRegister = async () => {
     if (!email || !password || !confirmPassword) {
@@ -45,10 +47,12 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegisterSuccess, onSw
     setLoading(false);
 
     if (result.success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('Success', 'Account created successfully!', [
         { text: 'OK', onPress: onRegisterSuccess }
       ]);
     } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Registration Failed', result.error);
     }
   };
@@ -68,47 +72,54 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegisterSuccess, onSw
         </View>
 
         <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+          <View style={[styles.inputContainer, focusedField === 'email' && styles.inputContainerFocused]}>
+            <Ionicons name="mail-outline" size={20} color={focusedField === 'email' ? '#2d5016' : '#6b7280'} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Email"
               value={email}
               onChangeText={setEmail}
+              onFocus={() => setFocusedField('email')}
+              onBlur={() => setFocusedField(null)}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
             />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+          <View style={[styles.inputContainer, focusedField === 'password' && styles.inputContainerFocused]}>
+            <Ionicons name="lock-closed-outline" size={20} color={focusedField === 'password' ? '#2d5016' : '#6b7280'} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Password (min 6 characters)"
               value={password}
               onChangeText={setPassword}
+              onFocus={() => setFocusedField('password')}
+              onBlur={() => setFocusedField(null)}
               secureTextEntry
               autoCapitalize="none"
             />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+          <View style={[styles.inputContainer, focusedField === 'confirm' && styles.inputContainerFocused]}>
+            <Ionicons name="lock-closed-outline" size={20} color={focusedField === 'confirm' ? '#2d5016' : '#6b7280'} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Confirm Password"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
+              onFocus={() => setFocusedField('confirm')}
+              onBlur={() => setFocusedField(null)}
               secureTextEntry
               autoCapitalize="none"
             />
           </View>
 
-          <TouchableOpacity 
-            style={[styles.registerButton, loading && styles.registerButtonDisabled]} 
+          <TouchableOpacity
+            style={[styles.registerButton, loading && styles.registerButtonDisabled]}
             onPress={handleRegister}
             disabled={loading}
+            activeOpacity={0.85}
           >
             <Text style={styles.registerButtonText}>
               {loading ? 'Creating Account...' : 'Create Account'}
@@ -121,7 +132,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ onRegisterSuccess, onSw
             <View style={styles.dividerLine} />
           </View>
 
-          <TouchableOpacity style={styles.loginButton} onPress={onSwitchToLogin}>
+          <TouchableOpacity style={styles.loginButton} onPress={onSwitchToLogin} activeOpacity={0.85}>
             <Text style={styles.loginButtonText}>Already have an account? Sign In</Text>
           </TouchableOpacity>
         </View>
@@ -182,6 +193,15 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderWidth: 1,
     borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  inputContainerFocused: {
+    borderColor: '#2d5016',
+    borderWidth: 2,
   },
   inputIcon: {
     marginRight: 12,

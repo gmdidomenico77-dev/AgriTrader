@@ -31,6 +31,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
     location: '',
     farmName: '',
   });
+  const [inputFocused, setInputFocused] = useState(false);
   const { updateProfile } = useUserProfile();
 
   const steps = [
@@ -73,19 +74,34 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // Geocode the location so lat/lon are stored for accurate weather-based predictions
       const coords = geocodingService.getCoordinates(profileData.location);
-      const success = await updateProfile({
-        ...profileData,
-        latitude: coords.lat,
-        longitude: coords.lon,
-        createdAt: new Date(),
-      });
+      const locationRecognized = geocodingService.isKnownLocation(profileData.location);
 
-      if (success) {
-        onComplete(profileData);
+      const save = async () => {
+        const success = await updateProfile({
+          ...profileData,
+          latitude: coords.lat,
+          longitude: coords.lon,
+          createdAt: new Date(),
+        });
+        if (success) {
+          onComplete(profileData);
+        } else {
+          Alert.alert('Error', 'Failed to save profile. Please try again.');
+        }
+      };
+
+      if (!locationRecognized) {
+        Alert.alert(
+          'Location Not Recognized',
+          `We couldn't find "${profileData.location}" in our region database. Price predictions will use Pennsylvania defaults until your location is matched.\n\nYou can update your location anytime in Profile settings.`,
+          [
+            { text: 'Go Back', style: 'cancel' },
+            { text: 'Continue Anyway', onPress: save },
+          ]
+        );
       } else {
-        Alert.alert('Error', 'Failed to save profile. Please try again.');
+        await save();
       }
     }
   };
@@ -134,13 +150,15 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       case 1:
         return (
           <View style={styles.stepContent}>
-            <View style={styles.inputContainer}>
-              <Ionicons name="person-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+            <View style={[styles.inputContainer, inputFocused && styles.inputContainerFocused]}>
+              <Ionicons name="person-outline" size={20} color={inputFocused ? "#2d5016" : "#6b7280"} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Enter your display name"
                 value={profileData.displayName}
                 onChangeText={(value) => handleInputChange('displayName', value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
                 autoFocus
               />
             </View>
@@ -152,13 +170,15 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       case 2:
         return (
           <View style={styles.stepContent}>
-            <View style={styles.inputContainer}>
-              <Ionicons name="location-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+            <View style={[styles.inputContainer, inputFocused && styles.inputContainerFocused]}>
+              <Ionicons name="location-outline" size={20} color={inputFocused ? "#2d5016" : "#6b7280"} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="e.g., Erie, PA"
                 value={profileData.location}
                 onChangeText={(value) => handleInputChange('location', value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
                 autoFocus
               />
             </View>
@@ -170,13 +190,15 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       case 3:
         return (
           <View style={styles.stepContent}>
-            <View style={styles.inputContainer}>
-              <Ionicons name="leaf-outline" size={20} color="#6b7280" style={styles.inputIcon} />
+            <View style={[styles.inputContainer, inputFocused && styles.inputContainerFocused]}>
+              <Ionicons name="leaf-outline" size={20} color={inputFocused ? "#2d5016" : "#6b7280"} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="e.g., Green Valley Farm"
                 value={profileData.farmName}
                 onChangeText={(value) => handleInputChange('farmName', value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
                 autoFocus
               />
             </View>
@@ -341,6 +363,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
     marginBottom: 16,
+  },
+  inputContainerFocused: {
+    borderColor: '#2d5016',
+    borderWidth: 2,
   },
   inputIcon: {
     marginRight: 12,
