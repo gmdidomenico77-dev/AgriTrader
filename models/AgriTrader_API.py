@@ -379,12 +379,31 @@ class AgriTraderAPI:
             if now - cached_time < _CACHE_TTL:
                 return {**cached_features, 'day_of_year': datetime.now().timetuple().tm_yday}
 
+        _FETCH_TIMEOUT = 12  # seconds per external API call
+
+        def _safe_result(future, default):
+            try:
+                return future.result(timeout=_FETCH_TIMEOUT)
+            except Exception:
+                return default
+
+        _neutral_weather = {"temperature_2m_max": 0.0, "precipitation_sum": 0.0,
+                            "gdd_cumulative": 0.0, "drought_index": 0.0}
+        _neutral_econ = {"10yr_treasury": 0.0, "unemployment_rate": 0.0,
+                         "cpi": 0.0, "usd_eur": 0.0}
+        _neutral_world = {"corn_world_price": 0.0, "soy_world_price": 0.0,
+                          "wheat_world_price": 0.0}
+
         with ThreadPoolExecutor(max_workers=3) as ex:
             f_weather = ex.submit(self.get_current_weather_data, lat, lon)
             f_econ    = ex.submit(self.get_current_economic_data)
             f_world   = ex.submit(self.get_world_prices)
 
-        features = {**f_weather.result(), **f_econ.result(), **f_world.result()}
+        features = {
+            **_safe_result(f_weather, _neutral_weather),
+            **_safe_result(f_econ,    _neutral_econ),
+            **_safe_result(f_world,   _neutral_world),
+        }
         _feature_cache[cache_key] = (now, features)
         features['day_of_year'] = datetime.now().timetuple().tm_yday
         

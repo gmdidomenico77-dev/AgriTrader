@@ -357,7 +357,7 @@ class PredictionService {
 
     if (isBackendReady) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000); // models can be slow on cold start
+      const timer = setTimeout(() => controller.abort(), 25000); // models can be slow on cold start
       try {
         const response = await fetch(`${API_BASE_URL}/predict/${crop}`, {
           method: 'POST',
@@ -391,7 +391,7 @@ class PredictionService {
 
     if (isBackendReady) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
+      const timer = setTimeout(() => controller.abort(), 25000);
       try {
         const response = await fetch(`${API_BASE_URL}/predict/${crop}/graph`, {
           method: 'POST',
