@@ -7,6 +7,7 @@ import json
 import os
 import math
 import time
+import threading
 import pandas as pd
 import numpy as np
 import requests
@@ -16,8 +17,30 @@ from AgriTrader_ML_Models import AgriTraderMLModels
 
 _TRAINING_FEATURE_STATS = None
 
+# --------------------------------------------------------------------------
+# Per-location weather cache (still per-request, but weather fetches are fast)
+# --------------------------------------------------------------------------
+_weather_cache: dict = {}
+_WEATHER_TTL = 1800  # 30 minutes
+
+# --------------------------------------------------------------------------
+# Global data cache — world prices + economic data are location-independent.
+# Fetched ONCE at startup and refreshed every 30 minutes in the background.
+# This is the key fix: eliminates per-request yfinance / FRED calls that
+# caused accumulated background threads → OOM kills.
+# --------------------------------------------------------------------------
+_global_data: dict = {
+    'world_prices': None,   # None = not yet fetched
+    'economic_data': None,
+    'last_updated': 0.0,
+    'refresh_in_progress': False,
+}
+_global_data_lock = threading.Lock()
+_GLOBAL_DATA_TTL = 1800  # 30 minutes
+
+# Legacy alias used by prepare_features before the refactor
 _feature_cache: dict = {}
-_CACHE_TTL = 300  # seconds
+_CACHE_TTL = 300  # kept for any callers that may reference it
 
 
 def _training_feature_stats():
@@ -114,16 +137,21 @@ class AgriTraderAPI:
     def __init__(self):
         self.ml_models = AgriTraderMLModels()
         self.load_models()
-        
+
         self.unscaling_params = self._load_unscaling_params()
-        
+
         # Location-specific adjustments (can be expanded)
         self.location_factors = {
             'PA': {'corn': 0.98, 'soybeans': 0.97, 'wheat': 0.99},  # Pennsylvania
-            'OH': {'corn': 1.02, 'soybeans': 1.01, 'wheat': 1.00},  # Ohio  
+            'OH': {'corn': 1.02, 'soybeans': 1.01, 'wheat': 1.00},  # Ohio
             'IN': {'corn': 1.01, 'soybeans': 1.00, 'wheat': 0.98},  # Indiana
             'IL': {'corn': 1.00, 'soybeans': 1.00, 'wheat': 1.00},  # Illinois (baseline)
         }
+
+        # Pre-populate world prices + economic data so the first real request
+        # doesn't pay the yfinance / FRED fetch cost (and so --preload workers
+        # inherit the warm cache via copy-on-write).
+        self.warm_up_global_cache()
     
     @staticmethod
     def _load_unscaling_params():
@@ -248,7 +276,7 @@ class AgriTraderAPI:
     def get_current_economic_data(self):
         """
         Economic features z-scored vs NORMAL_VALS training distribution.
-        Set FRED_API_KEY for live St. Louis Fed data; otherwise returns neutral zeros.
+        Called only by the global-data refresh; NOT on the per-request path.
         """
         stats = _training_feature_stats()
         out = {
@@ -257,11 +285,9 @@ class AgriTraderAPI:
             "cpi": 0.0,
             "usd_eur": 0.0,
         }
-        key = os.getenv("FRED_API_KEY", "").strip()
+        fred_key = os.getenv("FRED_API_KEY", "").strip()
 
         def _fred_latest(series_id):
-            # Public CSV endpoint — fetch via requests so we can enforce a timeout
-            # (pd.read_csv with a URL has no timeout and can hang forever if blocked)
             try:
                 csv_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
                 r = requests.get(csv_url, timeout=8)
@@ -274,64 +300,60 @@ class AgriTraderAPI:
                         return float(s.iloc[-1])
             except Exception:
                 pass
-
-            # Optional API key path as fallback
-            if key:
-                u = (
-                    "https://api.stlouisfed.org/fred/series/observations"
-                    f"?series_id={series_id}&api_key={key}&file_type=json&sort_order=desc&limit=1"
-                )
-                rr = requests.get(u, timeout=12)
-                rr.raise_for_status()
-                obs = rr.json().get("observations") or []
-                if obs:
-                    v = obs[0].get("value")
-                    if v is not None and v != ".":
-                        return float(v)
+            if fred_key:
+                try:
+                    u = (
+                        "https://api.stlouisfed.org/fred/series/observations"
+                        f"?series_id={series_id}&api_key={fred_key}&file_type=json&sort_order=desc&limit=1"
+                    )
+                    rr = requests.get(u, timeout=12)
+                    rr.raise_for_status()
+                    obs = rr.json().get("observations") or []
+                    if obs:
+                        v = obs[0].get("value")
+                        if v is not None and v != ".":
+                            return float(v)
+                except Exception:
+                    pass
             return None
 
         try:
-            dgs = _fred_latest("DGS10")
+            dgs   = _fred_latest("DGS10")
             unrate = _fred_latest("UNRATE")
-            cpi = _fred_latest("CPIAUCSL")
-            dex = _fred_latest("DEXUSEU")
-            if dgs is not None:
-                out["10yr_treasury"] = _zscore("10yr_treasury", dgs, stats)
-            if unrate is not None:
-                out["unemployment_rate"] = _zscore("unemployment_rate", unrate, stats)
-            if cpi is not None:
-                out["cpi"] = _zscore("cpi", cpi, stats)
-            if dex is not None:
-                out["usd_eur"] = _zscore("usd_eur", dex, stats)
+            cpi   = _fred_latest("CPIAUCSL")
+            dex   = _fred_latest("DEXUSEU")
+            if dgs    is not None: out["10yr_treasury"]    = _zscore("10yr_treasury",    dgs,    stats)
+            if unrate is not None: out["unemployment_rate"] = _zscore("unemployment_rate", unrate, stats)
+            if cpi    is not None: out["cpi"]               = _zscore("cpi",               cpi,    stats)
+            if dex    is not None: out["usd_eur"]           = _zscore("usd_eur",           dex,    stats)
         except Exception as e:
             print(f"[WARN] FRED economic fetch failed: {e}")
         return out
-    
+
     def get_world_prices(self):
         """
         Get current world commodity prices from Yahoo Finance (CBOT continuous futures).
-
-        Training data stored world prices in $/metric ton, so we convert
-        live $/bushel prices using the standard CBOT commodity weights before
-        z-scoring against the NORMAL_VALS stats.
+        Training data stored world prices in $/metric ton; convert live $/bushel prices
+        before z-scoring.  Called only by the global-data refresh.
         """
-        # Training data uses $/metric ton  (2204.62 lb / lbs-per-bushel)
-        # Corn: 56 lb/bu  →  2204.62/56  = 39.37 bu/mt
-        # Soy:  60 lb/bu  →  2204.62/60  = 36.74 bu/mt
-        # Wheat: 60 lb/bu →  2204.62/60  = 36.74 bu/mt
         BU_PER_MT = {'corn_world_price': 39.368, 'soy_world_price': 36.744, 'wheat_world_price': 36.744}
-
-        # Primary continuous contract + monthly fallbacks in case the front month rolled
         SYMBOLS = {
-            'corn_world_price':  ['ZC=F', 'ZCN26', 'ZCZ26', 'ZCH26'],
-            'soy_world_price':   ['ZS=F', 'ZSN26', 'ZSZ26', 'ZSH26'],
-            'wheat_world_price': ['ZW=F', 'ZWN26', 'ZWZ26', 'ZWH26'],
+            'corn_world_price':  ['ZC=F', 'ZCN26', 'ZCZ26'],
+            'soy_world_price':   ['ZS=F', 'ZSN26', 'ZSZ26'],
+            'wheat_world_price': ['ZW=F', 'ZWN26', 'ZWZ26'],
         }
 
         try:
             import yfinance as yf
+            # Patch yfinance's requests session with a hard per-call timeout so a
+            # single hung ticker can't block the entire refresh.
+            import requests as _req
+            _session = _req.Session()
+            _session.request = lambda method, url, **kw: (
+                _req.Session.request(_session, method, url, timeout=kw.pop('timeout', 8), **kw)
+            )
         except ImportError:
-            print("[WARNING] yfinance not available, using neutral world prices")
+            print("[WARN] yfinance not available; using neutral world prices")
             return {k: 0.0 for k in BU_PER_MT}
 
         stats = _training_feature_stats()
@@ -341,74 +363,128 @@ class AgriTraderAPI:
             price_per_bu = None
             for symbol in symbol_list:
                 try:
-                    hist = yf.Ticker(symbol).history(period='5d')
+                    hist = yf.Ticker(symbol, session=_session).history(period='5d')
                     if len(hist) > 0:
                         raw = float(hist["Close"].iloc[-1])
-                        # CBOT quotes in cents/bu; divide by 100 → $/bu
                         price_per_bu = raw / 100.0 if raw > 35 else raw
                         break
                 except Exception:
                     continue
 
             if price_per_bu is not None:
-                # Convert $/bu → $/metric ton to match training scale
                 price_per_mt = price_per_bu * BU_PER_MT[key]
                 z = _zscore(key, price_per_mt, stats)
                 world_prices[key] = z
-                print(f"[REAL-TIME] {key}: ${price_per_bu:.2f}/bu → ${price_per_mt:.1f}/mt (z-score: {z:.3f})")
+                print(f"[REAL-TIME] {key}: ${price_per_bu:.2f}/bu -> ${price_per_mt:.1f}/mt (z={z:.3f})")
             else:
                 world_prices[key] = 0.0
-                print(f"[FALLBACK] {key}: Using neutral value (all symbols unavailable)")
+                print(f"[FALLBACK] {key}: all symbols unavailable, using neutral")
 
         return world_prices
-    
+
+    # ------------------------------------------------------------------
+    # Global data cache management
+    # ------------------------------------------------------------------
+
+    def _do_refresh_global_data(self):
+        """Fetch world prices + economic data and write to _global_data.
+        Runs synchronously — call from a background thread or at startup."""
+        _NEUTRAL_ECON  = {"10yr_treasury": 0.0, "unemployment_rate": 0.0, "cpi": 0.0, "usd_eur": 0.0}
+        _NEUTRAL_WORLD = {"corn_world_price": 0.0, "soy_world_price": 0.0, "wheat_world_price": 0.0}
+        try:
+            print("[GLOBAL-CACHE] Refreshing world prices + economic data...")
+            # Fetch world prices and econ in parallel, each with a 20-second deadline
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                f_econ  = ex.submit(self.get_current_economic_data)
+                f_world = ex.submit(self.get_world_prices)
+            # By this point both threads have finished (with or without errors)
+            econ  = f_econ.result()  if not f_econ.exception()  else _NEUTRAL_ECON
+            world = f_world.result() if not f_world.exception() else _NEUTRAL_WORLD
+            with _global_data_lock:
+                _global_data['world_prices']   = world
+                _global_data['economic_data']  = econ
+                _global_data['last_updated']   = time.time()
+                _global_data['refresh_in_progress'] = False
+            print("[GLOBAL-CACHE] Refresh complete.")
+        except Exception as e:
+            print(f"[GLOBAL-CACHE] Refresh failed: {e}")
+            with _global_data_lock:
+                _global_data['refresh_in_progress'] = False
+
+    def _get_global_data(self):
+        """Return (world_prices, econ_data) from cache; trigger a background
+        refresh if the cache is stale.  Never blocks the calling request."""
+        _NEUTRAL_ECON  = {"10yr_treasury": 0.0, "unemployment_rate": 0.0, "cpi": 0.0, "usd_eur": 0.0}
+        _NEUTRAL_WORLD = {"corn_world_price": 0.0, "soy_world_price": 0.0, "wheat_world_price": 0.0}
+
+        now = time.time()
+        with _global_data_lock:
+            age       = now - _global_data['last_updated']
+            populated = _global_data['world_prices'] is not None
+            in_prog   = _global_data['refresh_in_progress']
+
+        if not populated:
+            # First call ever — must be synchronous (startup warm-up handles this,
+            # but be defensive in case it was skipped)
+            print("[GLOBAL-CACHE] Cache empty; fetching synchronously…")
+            self._do_refresh_global_data()
+        elif age > _GLOBAL_DATA_TTL and not in_prog:
+            # Stale — kick off a background refresh, return current values now
+            with _global_data_lock:
+                _global_data['refresh_in_progress'] = True
+            t = threading.Thread(target=self._do_refresh_global_data, daemon=True)
+            t.start()
+
+        with _global_data_lock:
+            world = dict(_global_data['world_prices'] or _NEUTRAL_WORLD)
+            econ  = dict(_global_data['economic_data'] or _NEUTRAL_ECON)
+        return world, econ
+
+    def warm_up_global_cache(self):
+        """Called once at startup (from __init__) to pre-populate the global
+        data cache so the first real user request doesn't pay the fetch cost."""
+        with _global_data_lock:
+            already_populated = _global_data['world_prices'] is not None
+        if not already_populated:
+            self._do_refresh_global_data()
+
     def prepare_features(self, user_location, lat=None, lon=None):
         """
-        Prepare feature vector for prediction based on user location and current data.
-        External API calls run in parallel; results are cached for 5 minutes.
+        Prepare feature vector for prediction.
+
+        Architecture:
+        - World prices + economic data: fetched ONCE at startup, cached globally
+          for 30 minutes, refreshed in the background when stale.
+          → NO per-request yfinance / FRED calls.  No background thread leaks.
+        - Weather: per-location, fetched with a hard 12-second timeout.
+          Cached per (lat, lon) for 30 minutes.
         """
-        global _feature_cache
-        cache_key = f"{lat}_{lon}"
-        now = time.time()
-        if cache_key in _feature_cache:
-            cached_time, cached_features = _feature_cache[cache_key]
-            if now - cached_time < _CACHE_TTL:
-                return {**cached_features, 'day_of_year': datetime.now().timetuple().tm_yday}
-
-        # IMPORTANT: do NOT use `with ThreadPoolExecutor` here.
-        # The context-manager form calls shutdown(wait=True) on exit,
-        # blocking until every thread finishes — including a hung yfinance call.
-        # Instead, submit all tasks, collect results with per-future timeouts,
-        # then shut down without waiting so stray threads finish in the background.
-        _FETCH_TIMEOUT = 12  # seconds per external source
-
-        _neutral_weather = {"temperature_2m_max": 0.0, "precipitation_sum": 0.0,
+        _NEUTRAL_WEATHER = {"temperature_2m_max": 0.0, "precipitation_sum": 0.0,
                             "gdd_cumulative": 0.0, "drought_index": 0.0}
-        _neutral_econ = {"10yr_treasury": 0.0, "unemployment_rate": 0.0,
-                         "cpi": 0.0, "usd_eur": 0.0}
-        _neutral_world = {"corn_world_price": 0.0, "soy_world_price": 0.0,
-                          "wheat_world_price": 0.0}
 
-        ex = ThreadPoolExecutor(max_workers=3)
-        f_weather = ex.submit(self.get_current_weather_data, lat, lon)
-        f_econ    = ex.submit(self.get_current_economic_data)
-        f_world   = ex.submit(self.get_world_prices)
-        ex.shutdown(wait=False)  # release the pool; threads finish in background
+        # 1. Global data (instant — served from cache)
+        world, econ = self._get_global_data()
 
-        def _safe_result(future, default):
+        # 2. Weather (per-location, cached 30 min)
+        weather_key = f"{lat}_{lon}"
+        now = time.time()
+        if weather_key in _weather_cache:
+            cached_at, cached_weather = _weather_cache[weather_key]
+            if now - cached_at < _WEATHER_TTL:
+                weather = cached_weather
+            else:
+                weather = None
+        else:
+            weather = None
+
+        if weather is None:
             try:
-                return future.result(timeout=_FETCH_TIMEOUT)
+                weather = self.get_current_weather_data(lat, lon)
             except Exception:
-                return default
+                weather = _NEUTRAL_WEATHER
+            _weather_cache[weather_key] = (now, weather)
 
-        features = {
-            **_safe_result(f_weather, _neutral_weather),
-            **_safe_result(f_econ,    _neutral_econ),
-            **_safe_result(f_world,   _neutral_world),
-        }
-        _feature_cache[cache_key] = (now, features)
-        features['day_of_year'] = datetime.now().timetuple().tm_yday
-        
+        features = {**weather, **econ, **world, 'day_of_year': datetime.now().timetuple().tm_yday}
         return features
     
     def predict_crop_price(self, crop, user_location, prediction_days=1, lat=None, lon=None):
