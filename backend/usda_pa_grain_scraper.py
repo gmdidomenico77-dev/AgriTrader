@@ -6,25 +6,38 @@ Source: https://www.ams.usda.gov/mnreports/ams_3091.pdf
 
 import requests
 import re
+import time
 import pdfplumber
 from io import BytesIO
 from datetime import datetime
-import pandas as pd
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 class USDAGrainBidScraper:
     """
     Scrapes Pennsylvania grain elevator bids from USDA AMS reports
     """
-    
-    # USDA Report URL for Pennsylvania Grain Bids
+
     REPORT_URL = "https://www.ams.usda.gov/mnreports/ams_3091.pdf"
-    
+
+    # Cache parsed bid data for 12 hours (report is published weekly)
+    _bid_cache: dict = {}       # crop -> {region -> bid_dict}
+    _cache_ts: float = 0.0
+    _CACHE_TTL: float = 43200   # 12 hours in seconds
+
+    def _make_session(self):
+        """Return a requests Session with retries disabled and a hard 5-second timeout."""
+        session = requests.Session()
+        adapter = HTTPAdapter(max_retries=Retry(total=0))  # no retries whatsoever
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+
     def fetch_latest_report(self):
-        """
-        Download the latest Pennsylvania Grain Bids PDF from USDA
-        """
+        """Download the latest Pennsylvania Grain Bids PDF from USDA."""
         try:
-            response = requests.get(self.REPORT_URL, timeout=10)
+            session = self._make_session()
+            response = session.get(self.REPORT_URL, timeout=5)
             response.raise_for_status()
             return BytesIO(response.content)
         except Exception as e:
@@ -113,69 +126,62 @@ class USDAGrainBidScraper:
         
         return bids
     
+    def _refresh_cache(self):
+        """Fetch + parse the USDA report, update _bid_cache. Returns True on success."""
+        pdf_data = self.fetch_latest_report()
+        if not pdf_data:
+            return False
+        try:
+            with pdfplumber.open(pdf_data) as pdf:
+                text = "".join(page.extract_text() or "" for page in pdf.pages)
+            self._bid_cache = {
+                'corn':     self.parse_corn_bids(text),
+                'soybeans': self.parse_soybean_bids(text),
+                'wheat':    self.parse_wheat_bids(text),
+            }
+            self._cache_ts = time.time()
+            print(f"[USDA] Report parsed and cached.")
+            return True
+        except Exception as e:
+            print(f"Error parsing USDA report: {e}")
+            return False
+
     def get_local_bids(self, crop, region='central'):
         """
-        Get local elevator bids for a specific crop and region
-        
-        Args:
-            crop: 'corn', 'soybeans', or 'wheat'
-            region: 'east', 'west', or 'central' Pennsylvania
-        
-        Returns:
-            Dictionary with bid data
+        Get local elevator bids for a specific crop and region.
+
+        Results are cached for 12 hours so every prediction doesn't trigger a
+        network round-trip to USDA.  If the cache is stale and a fresh fetch
+        fails, the stale data is returned rather than blocking.
         """
-        try:
-            # Fetch PDF
-            pdf_data = self.fetch_latest_report()
-            if not pdf_data:
+        # Refresh cache if empty or older than TTL
+        if not self._bid_cache or (time.time() - self._cache_ts) > self._CACHE_TTL:
+            self._refresh_cache()
+            # If still empty after attempted refresh, give up
+            if not self._bid_cache:
                 return None
-            
-            # Extract text from PDF
-            with pdfplumber.open(pdf_data) as pdf:
-                text = ""
-                for page in pdf.pages:
-                    text += page.extract_text()
-            
-            # Parse based on crop
-            if crop.lower() == 'corn':
-                bids = self.parse_corn_bids(text)
-            elif crop.lower() in ['soybeans', 'soybean']:
-                bids = self.parse_soybean_bids(text)
-            elif crop.lower() == 'wheat':
-                bids = self.parse_wheat_bids(text)
-            else:
-                return None
-            
-            # Return data for requested region
-            region = region.lower()
-            if region in bids and bids[region]['avg'] is not None:
-                return {
-                    'crop': crop,
-                    'region': region,
-                    'low': bids[region]['low'],
-                    'high': bids[region]['high'],
-                    'average': bids[region]['avg'],
-                    'source': 'USDA AMS PA Grain Bids',
-                    'date': datetime.now().strftime('%Y-%m-%d')
-                }
-            
+
+        crop_key = 'soybeans' if crop.lower() in ('soybeans', 'soybean') else crop.lower()
+        bids = self._bid_cache.get(crop_key)
+        if not bids:
             return None
-            
-        except Exception as e:
-            print(f"Error parsing USDA bids: {e}")
-            return None
+
+        region = region.lower()
+        if region in bids and bids[region]['avg'] is not None:
+            return {
+                'crop': crop,
+                'region': region,
+                'low': bids[region]['low'],
+                'high': bids[region]['high'],
+                'average': bids[region]['avg'],
+                'source': 'USDA AMS PA Grain Bids',
+                'date': datetime.now().strftime('%Y-%m-%d'),
+            }
+        return None
     
     def get_all_regional_bids(self, crop):
-        """Get bids for all PA regions"""
-        regions = ['east', 'west', 'central']
-        all_bids = []
-        
-        for region in regions:
-            bid = self.get_local_bids(crop, region)
-            if bid:
-                all_bids.append(bid)
-        
-        return all_bids
+        """Get bids for all PA regions (single cache fetch)."""
+        return [b for b in (self.get_local_bids(crop, r) for r in ('east', 'central', 'west')) if b]
     
     def get_statewide_average(self, crop):
         """Calculate PA statewide average from regional bids"""
