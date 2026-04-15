@@ -142,16 +142,96 @@ def _cached_prediction(
     )
 
 
+def _get_usda_bid(crop: str, lat, lon):
+    """Fetch the USDA local elevator bid for this crop + location.
+    Returns the bid dict on success, None on any failure."""
+    try:
+        region = _lat_lon_to_pa_region(lat or 40.2737, lon or -76.8844)
+        return usda_scraper.get_local_bids(crop, region), region
+    except Exception as e:
+        print(f"[WARNING] USDA bid lookup failed: {e}")
+        return None, 'central'
+
+
+def _calibrate_to_local_market(result: dict, usda_bid: float) -> dict:
+    """
+    Anchor the ML prediction to the actual local elevator bid.
+
+    The ML model was trained on 2024–2025 baseline prices. Current PA
+    elevator bids may diverge significantly from that baseline (different
+    market cycle, basis changes, etc.).
+
+    Strategy: additive basis adjustment.
+      basis = usda_bid_today - ml_day1_price
+      calibrated_future_N = ml_price_N + basis
+
+    This preserves the ML model's predicted TREND (direction and dollar-
+    magnitude of change over time) while anchoring the absolute price level
+    to what the farmer can actually get at their local elevator today.
+    """
+    ml_price = result.get('predicted_price', 0)
+    if ml_price <= 0:
+        return result
+
+    basis = usda_bid - ml_price
+    if abs(basis) < 0.05:          # < 5 cents — no meaningful gap, skip
+        return result
+
+    result = dict(result)          # shallow copy — don't mutate the lru_cache dict
+    ci_half = (result['confidence_upper'] - result['confidence_lower']) / 2.0
+    result['predicted_price']  = round(usda_bid, 4)
+    result['confidence_lower'] = round(usda_bid - ci_half, 4)
+    result['confidence_upper'] = round(usda_bid + ci_half, 4)
+    result['ml_raw_price']     = round(ml_price, 4)  # keep original for diagnostics
+    result['basis_applied']    = round(basis, 4)
+    print(f"[CALIBRATED] ML=${ml_price:.2f} + basis=${basis:+.2f} -> ${usda_bid:.2f}")
+    return result
+
+
+def _calibrate_graph_to_local_market(graph: dict, usda_bid: float) -> dict:
+    """
+    Apply the same basis adjustment to every data point in the graph.
+    Preserves the ML trend shape while anchoring day-1 to the USDA bid.
+    """
+    pts = graph.get('data_points', [])
+    if not pts:
+        return graph
+
+    ml_day1 = pts[0].get('predicted_price', 0)
+    if ml_day1 <= 0:
+        return graph
+
+    basis = usda_bid - ml_day1
+    if abs(basis) < 0.05:
+        return graph
+
+    graph = dict(graph)
+    graph['data_points'] = [
+        {
+            **pt,
+            'predicted_price':  round(pt['predicted_price']  + basis, 4),
+            'confidence_lower': round(pt['confidence_lower'] + basis, 4),
+            'confidence_upper': round(pt['confidence_upper'] + basis, 4),
+        }
+        for pt in pts
+    ]
+    graph['current_price'] = round(graph.get('current_price', ml_day1) + basis, 4)
+    if graph.get('peak_price'):
+        graph['peak_price'] = round(graph['peak_price'] + basis, 4)
+    graph['ml_basis_applied'] = round(basis, 4)
+    print(f"[CALIBRATED GRAPH] basis={basis:+.2f}  day1: ${ml_day1:.2f} -> ${usda_bid:.2f}")
+    return graph
+
+
 @app.route('/api/predict/<crop>', methods=['POST'])
 def predict_price(crop):
-    """Predict price for specific crop using REAL-TIME data"""
+    """Predict price for specific crop, anchored to current local elevator bid."""
     try:
         crop = crop.lower()
         if crop not in ALLOWED_CROPS:
             return jsonify({"error": f"Unsupported crop '{crop}'", "allowed_crops": sorted(ALLOWED_CROPS)}), 400
 
         data = request.get_json() or {}
-        
         user_location = data.get('location', 'PA')
         prediction_days = int(data.get('days', 1))
         if prediction_days < 1 or prediction_days > MAX_PREDICTION_DAYS:
@@ -162,27 +242,26 @@ def predict_price(crop):
 
         lat = data.get('lat')
         lon = data.get('lon')
-        
+
         print(f"\n[PREDICTION REQUEST] Crop: {crop}, Location: {user_location}, Days: {prediction_days}")
         print("[FETCHING] Real-time market data...")
 
         as_of = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        result = _cached_prediction(crop, user_location, prediction_days, lat, lon, as_of)
-        
-        # Add real-time USDA local bids using the user's actual PA region
-        try:
-            region = _lat_lon_to_pa_region(lat or 40.2737, lon or -76.8844)
-            local_bid = usda_scraper.get_local_bids(crop, region)
-            if local_bid:
-                result['local_bid'] = local_bid['average']
-                result['local_bid_low'] = local_bid.get('low')
-                result['local_bid_high'] = local_bid.get('high')
-                result['local_bid_region'] = region
-                result['local_bid_source'] = 'USDA AMS PA Grain Report'
-                print(f"[USDA BID] {crop} ({region} PA): ${local_bid['average']:.2f}")
-        except Exception as e:
-            print(f"[WARNING] Could not fetch USDA local bid: {e}")
-        
+        result = dict(_cached_prediction(crop, user_location, prediction_days, lat, lon, as_of))
+
+        # Fetch local elevator bid and calibrate
+        local_bid_data, region = _get_usda_bid(crop, lat, lon)
+        if local_bid_data:
+            result['local_bid']        = local_bid_data['average']
+            result['local_bid_low']    = local_bid_data.get('low')
+            result['local_bid_high']   = local_bid_data.get('high')
+            result['local_bid_region'] = region
+            result['local_bid_source'] = 'USDA AMS PA Grain Report'
+            print(f"[USDA BID] {crop} ({region} PA): ${local_bid_data['average']:.2f}")
+
+            # Anchor ML prediction to actual local market price
+            result = _calibrate_to_local_market(result, local_bid_data['average'])
+
         print(f"[PREDICTION] {crop}: ${result.get('predicted_price', 0):.2f}")
         result.setdefault("diagnostics", {})
         result["diagnostics"].update({
@@ -192,38 +271,41 @@ def predict_price(crop):
             "fallback_used": bool(result.get("fallback_used", False)),
         })
         return jsonify(result)
-        
+
     except Exception as e:
         print(f"[ERROR] Prediction failed: {str(e)}")
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'error': f'Prediction failed: {str(e)}'
-        }), 500
+        return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
+
 
 @app.route('/api/predict/<crop>/graph', methods=['POST'])
 def predict_price_graph(crop):
-    """Get price predictions for graph display"""
+    """Get multi-month price forecast anchored to current local elevator bid."""
     try:
         data = request.get_json() or {}
-        
         user_location = data.get('location', 'PA')
         lat = data.get('lat')
         lon = data.get('lon')
-        
+
         result = api.predict_price_graph(
             crop=crop,
             user_location=user_location,
             lat=lat,
-            lon=lon
+            lon=lon,
         )
-        
+
+        # Fetch local elevator bid and calibrate graph data points
+        local_bid_data, region = _get_usda_bid(crop, lat, lon)
+        if local_bid_data:
+            result['local_bid']        = local_bid_data['average']
+            result['local_bid_region'] = region
+            result = _calibrate_graph_to_local_market(result, local_bid_data['average'])
+
         return jsonify(result)
-        
+
     except Exception as e:
-        return jsonify({
-            'error': f'Graph prediction failed: {str(e)}'
-        }), 500
+        return jsonify({'error': f'Graph prediction failed: {str(e)}'}), 500
 
 @app.route('/api/predict/<crop>/historical', methods=['GET'])
 def get_historical_prices(crop):
