@@ -309,62 +309,58 @@ class AgriTraderAPI:
     
     def get_world_prices(self):
         """
-        Get current world commodity prices from Yahoo Finance
-        Fetches REAL-TIME CBOT futures prices
+        Get current world commodity prices from Yahoo Finance (CBOT continuous futures).
+
+        Training data stored world prices in $/metric ton, so we convert
+        live $/bushel prices using the standard CBOT commodity weights before
+        z-scoring against the NORMAL_VALS stats.
         """
+        # Training data uses $/metric ton  (2204.62 lb / lbs-per-bushel)
+        # Corn: 56 lb/bu  →  2204.62/56  = 39.37 bu/mt
+        # Soy:  60 lb/bu  →  2204.62/60  = 36.74 bu/mt
+        # Wheat: 60 lb/bu →  2204.62/60  = 36.74 bu/mt
+        BU_PER_MT = {'corn_world_price': 39.368, 'soy_world_price': 36.744, 'wheat_world_price': 36.744}
+
+        # Primary continuous contract + monthly fallbacks in case the front month rolled
+        SYMBOLS = {
+            'corn_world_price':  ['ZC=F', 'ZCN26', 'ZCZ26', 'ZCH26'],
+            'soy_world_price':   ['ZS=F', 'ZSN26', 'ZSZ26', 'ZSH26'],
+            'wheat_world_price': ['ZW=F', 'ZWN26', 'ZWZ26', 'ZWH26'],
+        }
+
         try:
             import yfinance as yf
-            from datetime import datetime
-            
-            # CBOT futures symbols
-            symbols = {
-                'corn_world_price': 'ZC=F',    # Corn futures
-                'soy_world_price': 'ZS=F',     # Soybean futures  
-                'wheat_world_price': 'ZW=F'    # Wheat futures
-            }
-            
-            stats = _training_feature_stats()
-            world_prices = {}
-            
-            for key, symbol in symbols.items():
-                try:
-                    ticker = yf.Ticker(symbol)
-                    hist = ticker.history(period='5d')
-                    
-                    if len(hist) > 0:
-                        latest_price = float(hist["Close"].iloc[-1])
-                        if latest_price > 35:
-                            latest_price = latest_price / 100.0
-
-                        scaled_price = _zscore(key, latest_price, stats)
-                        world_prices[key] = scaled_price
-                        
-                        print(f"[REAL-TIME] {key}: ${latest_price:.2f}/bu (z-score: {scaled_price:.3f})")
-                    else:
-                        world_prices[key] = 0.0
-                        print(f"[FALLBACK] {key}: Using neutral value")
-                        
-                except Exception as e:
-                    print(f"[WARNING] Could not fetch {symbol}: {e}")
-                    world_prices[key] = 0.0
-            
-            return world_prices
-            
         except ImportError:
-            print("[WARNING] yfinance not available, using fallback values")
-            # Fallback to current market conditions (October 2025)
-            return {
-                'corn_world_price': 0.0,      # Near baseline
-                'soy_world_price': 0.1,       # Slightly above baseline
-                'wheat_world_price': -0.05    # Slightly below baseline
-            }
-        except Exception as e:
-            print(f"[ERROR] get_world_prices failed: {e}")
-            return {
-                'corn_world_price': 0.0,
-                'soy_world_price': 0.0,
-                'wheat_world_price': 0.0
-            }
+            print("[WARNING] yfinance not available, using neutral world prices")
+            return {k: 0.0 for k in BU_PER_MT}
+
+        stats = _training_feature_stats()
+        world_prices = {}
+
+        for key, symbol_list in SYMBOLS.items():
+            price_per_bu = None
+            for symbol in symbol_list:
+                try:
+                    hist = yf.Ticker(symbol).history(period='5d')
+                    if len(hist) > 0:
+                        raw = float(hist["Close"].iloc[-1])
+                        # CBOT quotes in cents/bu; divide by 100 → $/bu
+                        price_per_bu = raw / 100.0 if raw > 35 else raw
+                        break
+                except Exception:
+                    continue
+
+            if price_per_bu is not None:
+                # Convert $/bu → $/metric ton to match training scale
+                price_per_mt = price_per_bu * BU_PER_MT[key]
+                z = _zscore(key, price_per_mt, stats)
+                world_prices[key] = z
+                print(f"[REAL-TIME] {key}: ${price_per_bu:.2f}/bu → ${price_per_mt:.1f}/mt (z-score: {z:.3f})")
+            else:
+                world_prices[key] = 0.0
+                print(f"[FALLBACK] {key}: Using neutral value (all symbols unavailable)")
+
+        return world_prices
     
     def prepare_features(self, user_location, lat=None, lon=None):
         """
@@ -379,13 +375,12 @@ class AgriTraderAPI:
             if now - cached_time < _CACHE_TTL:
                 return {**cached_features, 'day_of_year': datetime.now().timetuple().tm_yday}
 
-        _FETCH_TIMEOUT = 12  # seconds per external API call
-
-        def _safe_result(future, default):
-            try:
-                return future.result(timeout=_FETCH_TIMEOUT)
-            except Exception:
-                return default
+        # IMPORTANT: do NOT use `with ThreadPoolExecutor` here.
+        # The context-manager form calls shutdown(wait=True) on exit,
+        # blocking until every thread finishes — including a hung yfinance call.
+        # Instead, submit all tasks, collect results with per-future timeouts,
+        # then shut down without waiting so stray threads finish in the background.
+        _FETCH_TIMEOUT = 12  # seconds per external source
 
         _neutral_weather = {"temperature_2m_max": 0.0, "precipitation_sum": 0.0,
                             "gdd_cumulative": 0.0, "drought_index": 0.0}
@@ -394,10 +389,17 @@ class AgriTraderAPI:
         _neutral_world = {"corn_world_price": 0.0, "soy_world_price": 0.0,
                           "wheat_world_price": 0.0}
 
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            f_weather = ex.submit(self.get_current_weather_data, lat, lon)
-            f_econ    = ex.submit(self.get_current_economic_data)
-            f_world   = ex.submit(self.get_world_prices)
+        ex = ThreadPoolExecutor(max_workers=3)
+        f_weather = ex.submit(self.get_current_weather_data, lat, lon)
+        f_econ    = ex.submit(self.get_current_economic_data)
+        f_world   = ex.submit(self.get_world_prices)
+        ex.shutdown(wait=False)  # release the pool; threads finish in background
+
+        def _safe_result(future, default):
+            try:
+                return future.result(timeout=_FETCH_TIMEOUT)
+            except Exception:
+                return default
 
         features = {
             **_safe_result(f_weather, _neutral_weather),
