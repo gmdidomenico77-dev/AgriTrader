@@ -42,6 +42,29 @@ class HistoricalDataService {
   }
 
   async getRecentPrices(crop: string, count: number = 5): Promise<number[]> {
+    // Try the backend first — its CSV is kept up-to-date via daily_data_updater,
+    // while the bundled data.csv may be months stale.  The chart concatenates
+    // these historical prices with forward predictions, so they MUST come from
+    // the same data source the backend uses to anchor predictions.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/historical/${crop}?days=${count}`,
+        { signal: controller.signal },
+      );
+      clearTimeout(timer);
+      if (response.ok) {
+        const data = (await response.json()) as { prices?: Array<{ price: number }> };
+        if (Array.isArray(data.prices) && data.prices.length > 0) {
+          return data.prices.map((p) => p.price);
+        }
+      }
+    } catch {
+      clearTimeout(timer);
+    }
+
+    // Fallback to bundled CSV when backend is unreachable
     return csvDataService.getRecentPrices(crop, count);
   }
 

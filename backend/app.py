@@ -153,79 +153,110 @@ def _get_usda_bid(crop: str, lat, lon):
         return None, 'central'
 
 
-def _calibrate_to_local_market(result: dict, usda_bid: float) -> dict:
+def _get_anchor_price(crop: str, user_location: str, lat, lon):
+    """Get the best available real-world price to anchor ML predictions.
+
+    Priority: CSV historical (same source the chart shows) > USDA bid > None.
+    Returns (price, source_label) or (None, None).
     """
-    Anchor the ML prediction to the actual local elevator bid.
+    csv_price = csv_data.get_latest_price(crop, user_location)
+    if csv_price is not None and csv_price > 0:
+        return csv_price, 'csv_historical'
 
-    The ML model was trained on 2024–2025 baseline prices. Current PA
-    elevator bids may diverge significantly from that baseline (different
-    market cycle, basis changes, etc.).
+    bid_data, _region = _get_usda_bid(crop, lat, lon)
+    if bid_data:
+        return bid_data['average'], 'usda_bid'
 
-    Strategy: additive basis adjustment.
-      basis = usda_bid_today - ml_day1_price
-      calibrated_future_N = ml_price_N + basis
+    return None, None
 
-    This preserves the ML model's predicted TREND (direction and dollar-
-    magnitude of change over time) while anchoring the absolute price level
-    to what the farmer can actually get at their local elevator today.
+
+def _get_training_mean(crop: str) -> float:
+    """Return the unscaling mean for a crop — the model's 'neutral' output."""
+    return api.unscaling_params.get(crop, {}).get('mean', 0)
+
+
+def _calibrate_prediction(result: dict, anchor: float, training_mean: float) -> dict:
+    """Anchor ML prediction to current market while PRESERVING the model's signal.
+
+    The model's output (after unscaling) reflects weather, economics, and
+    seasonal factors.  Its deviation from the training-era mean IS the
+    predictive signal:
+
+        model_signal = ml_price - training_mean
+        calibrated   = anchor   + model_signal
+
+    This way:
+      - Different locations → different weather → different ml_price →
+        different model_signal → different calibrated price.
+      - The absolute price is grounded in reality (anchor = current market).
+      - The model's directional assessment is preserved, not overwritten.
     """
     ml_price = result.get('predicted_price', 0)
-    if ml_price <= 0:
+    if ml_price <= 0 or anchor <= 0:
         return result
 
-    basis = usda_bid - ml_price
-    if abs(basis) < 0.05:          # < 5 cents — no meaningful gap, skip
-        return result
+    model_signal = ml_price - training_mean
+    calibrated = anchor + model_signal
 
     result = dict(result)          # shallow copy — don't mutate the lru_cache dict
     ci_half = (result['confidence_upper'] - result['confidence_lower']) / 2.0
-    result['predicted_price']  = round(usda_bid, 4)
-    result['confidence_lower'] = round(usda_bid - ci_half, 4)
-    result['confidence_upper'] = round(usda_bid + ci_half, 4)
-    result['ml_raw_price']     = round(ml_price, 4)  # keep original for diagnostics
-    result['basis_applied']    = round(basis, 4)
-    print(f"[CALIBRATED] ML=${ml_price:.2f} + basis=${basis:+.2f} -> ${usda_bid:.2f}")
+    result['predicted_price']  = round(calibrated, 4)
+    result['confidence_lower'] = round(calibrated - ci_half, 4)
+    result['confidence_upper'] = round(calibrated + ci_half, 4)
+    result['ml_raw_price']     = round(ml_price, 4)
+    result['anchor_price']     = round(anchor, 4)
+    result['model_signal']     = round(model_signal, 4)
+    print(f"[CALIBRATED] ML=${ml_price:.2f}, mean={training_mean:.2f}, "
+          f"signal={model_signal:+.3f}, anchor=${anchor:.2f} -> ${calibrated:.2f}")
     return result
 
 
-def _calibrate_graph_to_local_market(graph: dict, usda_bid: float) -> dict:
-    """
-    Apply the same basis adjustment to every data point in the graph.
-    Preserves the ML trend shape while anchoring day-1 to the USDA bid.
+def _calibrate_graph(graph: dict, anchor: float, training_mean: float) -> dict:
+    """Apply signal-based calibration to every data point in the graph.
+
+    Each point: calibrated_N = anchor + (ml_N - training_mean)
+
+    This preserves the model's predicted trend shape AND location-dependent
+    offsets, while grounding the absolute price level in reality.
     """
     pts = graph.get('data_points', [])
-    if not pts:
-        return graph
-
-    ml_day1 = pts[0].get('predicted_price', 0)
-    if ml_day1 <= 0:
-        return graph
-
-    basis = usda_bid - ml_day1
-    if abs(basis) < 0.05:
+    if not pts or anchor <= 0:
         return graph
 
     graph = dict(graph)
-    graph['data_points'] = [
-        {
+    new_pts = []
+    for pt in pts:
+        ml_p = pt.get('predicted_price', 0)
+        if ml_p <= 0:
+            new_pts.append(pt)
+            continue
+        signal = ml_p - training_mean
+        cal = anchor + signal
+        ci_half = (pt['confidence_upper'] - pt['confidence_lower']) / 2.0
+        new_pts.append({
             **pt,
-            'predicted_price':  round(pt['predicted_price']  + basis, 4),
-            'confidence_lower': round(pt['confidence_lower'] + basis, 4),
-            'confidence_upper': round(pt['confidence_upper'] + basis, 4),
-        }
-        for pt in pts
-    ]
-    graph['current_price'] = round(graph.get('current_price', ml_day1) + basis, 4)
+            'predicted_price':  round(cal, 4),
+            'confidence_lower': round(cal - ci_half, 4),
+            'confidence_upper': round(cal + ci_half, 4),
+        })
+
+    graph['data_points'] = new_pts
+    if new_pts:
+        graph['current_price'] = new_pts[0]['predicted_price']
     if graph.get('peak_price'):
-        graph['peak_price'] = round(graph['peak_price'] + basis, 4)
-    graph['ml_basis_applied'] = round(basis, 4)
-    print(f"[CALIBRATED GRAPH] basis={basis:+.2f}  day1: ${ml_day1:.2f} -> ${usda_bid:.2f}")
+        ml_peak = graph['peak_price']
+        graph['peak_price'] = round(anchor + (ml_peak - training_mean), 4)
+    graph['anchor_price'] = round(anchor, 4)
+    graph['training_mean'] = round(training_mean, 4)
+    day1_signal = (pts[0].get('predicted_price', training_mean) - training_mean) if pts else 0
+    print(f"[CALIBRATED GRAPH] anchor=${anchor:.2f}, mean={training_mean:.2f}, "
+          f"day1_signal={day1_signal:+.3f}")
     return graph
 
 
 @app.route('/api/predict/<crop>', methods=['POST'])
 def predict_price(crop):
-    """Predict price for specific crop, anchored to current local elevator bid."""
+    """Predict price for specific crop using ML model + real-world anchor."""
     try:
         crop = crop.lower()
         if crop not in ALLOWED_CROPS:
@@ -249,7 +280,7 @@ def predict_price(crop):
         as_of = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         result = dict(_cached_prediction(crop, user_location, prediction_days, lat, lon, as_of))
 
-        # Fetch local elevator bid and calibrate
+        # Attach USDA bid info (informational — shown separately in the UI)
         local_bid_data, region = _get_usda_bid(crop, lat, lon)
         if local_bid_data:
             result['local_bid']        = local_bid_data['average']
@@ -259,8 +290,12 @@ def predict_price(crop):
             result['local_bid_source'] = 'USDA AMS PA Grain Report'
             print(f"[USDA BID] {crop} ({region} PA): ${local_bid_data['average']:.2f}")
 
-            # Anchor ML prediction to actual local market price
-            result = _calibrate_to_local_market(result, local_bid_data['average'])
+        # Calibrate: anchor to current market, preserve ML model signal
+        anchor, anchor_src = _get_anchor_price(crop, user_location, lat, lon)
+        training_mean = _get_training_mean(crop)
+        if anchor is not None and training_mean > 0:
+            result = _calibrate_prediction(result, anchor, training_mean)
+            result['anchor_source'] = anchor_src
 
         print(f"[PREDICTION] {crop}: ${result.get('predicted_price', 0):.2f}")
         result.setdefault("diagnostics", {})
@@ -281,13 +316,11 @@ def predict_price(crop):
 
 @app.route('/api/predict/<crop>/graph', methods=['POST'])
 def predict_price_graph(crop):
-    """Get multi-month price forecast anchored to the last historical CSV price.
+    """Get multi-month price forecast using the same anchor as /predict/<crop>.
 
-    The frontend chart concatenates historical CSV prices with predicted prices.
-    To avoid a visible cliff at the transition, we anchor predictions to the
-    last known CSV price (which is the last point the user sees on the chart).
-    The ML model's predicted *trend* (direction and magnitude) is preserved —
-    only the absolute price level shifts to ensure continuity.
+    Both endpoints use the same anchor source (CSV historical > USDA bid) and
+    the same signal-preserving calibration so the big-label price and the
+    graph's +1d point always agree.
     """
     try:
         data = request.get_json() or {}
@@ -302,36 +335,18 @@ def predict_price_graph(crop):
             lon=lon,
         )
 
-        # --- Anchor to last CSV price for chart continuity ---
-        # The chart shows historical CSV prices then predictions; the anchor
-        # must match the historical source so there is no visual jump.
-        csv_anchor = csv_data.get_latest_price(crop, user_location)
+        # Same anchor + calibration as the single-point endpoint
+        anchor, anchor_src = _get_anchor_price(crop, user_location, lat, lon)
+        training_mean = _get_training_mean(crop)
+        if anchor is not None and training_mean > 0:
+            result = _calibrate_graph(result, anchor, training_mean)
+            result['anchor_source'] = anchor_src
 
-        if csv_anchor is not None and csv_anchor > 0:
-            result = _calibrate_graph_to_local_market(result, csv_anchor)
-            result['anchor_source'] = 'csv_historical'
-            result['anchor_price'] = csv_anchor
-            print(f"[GRAPH] Anchored {crop} predictions to CSV last price ${csv_anchor:.2f}")
-        else:
-            # CSV unavailable — fall back to USDA bid so predictions are
-            # at least in the right ballpark vs current market.
-            local_bid_data, region = _get_usda_bid(crop, lat, lon)
-            if local_bid_data:
-                result['local_bid']        = local_bid_data['average']
-                result['local_bid_region'] = region
-                result = _calibrate_graph_to_local_market(result, local_bid_data['average'])
-                result['anchor_source'] = 'usda_bid'
-                print(f"[GRAPH] CSV unavailable; anchored {crop} to USDA bid ${local_bid_data['average']:.2f}")
-            else:
-                result['anchor_source'] = 'ml_raw'
-                print(f"[GRAPH] No anchor available for {crop}; using raw ML output")
-
-        # Include USDA bid for informational display even when CSV is the anchor
-        if 'local_bid' not in result:
-            local_bid_data, region = _get_usda_bid(crop, lat, lon)
-            if local_bid_data:
-                result['local_bid']        = local_bid_data['average']
-                result['local_bid_region'] = region
+        # Attach USDA bid for informational display
+        local_bid_data, region = _get_usda_bid(crop, lat, lon)
+        if local_bid_data:
+            result['local_bid']        = local_bid_data['average']
+            result['local_bid_region'] = region
 
         return jsonify(result)
 
