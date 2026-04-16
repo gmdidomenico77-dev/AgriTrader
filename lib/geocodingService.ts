@@ -1,6 +1,7 @@
 /**
  * Geocoding Service - Convert location strings to coordinates
- * Uses a lookup for common locations; avoids false matches (e.g. "pa" inside "Cranberry Township, PA").
+ * Uses a lookup for common locations; falls back to Open Meteo's free geocoding
+ * API for unknown locations so we never silently default to Harrisburg.
  */
 
 interface LocationCoordinates {
@@ -43,17 +44,22 @@ class GeocodingService {
     'chicago': { lat: 41.8781, lon: -87.6298, city: 'Chicago', state: 'IL' },
   };
 
+  /** US state abbreviation → full name, used to improve Open Meteo search queries */
+  private stateNames: Record<string, string> = {
+    'pa': 'Pennsylvania', 'oh': 'Ohio', 'in': 'Indiana', 'il': 'Illinois',
+    'ny': 'New York', 'nj': 'New Jersey', 'md': 'Maryland', 'va': 'Virginia',
+    'wv': 'West Virginia', 'de': 'Delaware', 'ky': 'Kentucky', 'mi': 'Michigan',
+    'ia': 'Iowa', 'mo': 'Missouri', 'wi': 'Wisconsin', 'mn': 'Minnesota',
+  };
+
   private stateAbbrevMatchesLocation(normalized: string, abbrev: string): boolean {
     if (normalized === abbrev) return true;
     const suffix = `, ${abbrev}`;
     return normalized.endsWith(suffix);
   }
 
-  /**
-   * Get coordinates from location string.
-   * Defaults to Harrisburg, PA only when there is no reasonable match.
-   */
-  getCoordinates(location: string): LocationCoordinates {
+  /** Try the local hardcoded map (fast, sync). Returns null on miss. */
+  private lookupLocal(location: string): LocationCoordinates | null {
     const normalized = location.toLowerCase().trim().replace(/\s+/g, ' ');
 
     if (this.locationMap[normalized]) {
@@ -85,7 +91,93 @@ class GeocodingService {
       return partialMatches[0].coords;
     }
 
-    console.log(`[Geocoding] Location "${location}" not found, defaulting to Harrisburg, PA`);
+    return null;
+  }
+
+  /**
+   * Query Open Meteo's free geocoding API for coordinates.
+   * Restricts results to the US and prefers results in the user's state if provided.
+   */
+  private async geocodeViaOpenMeteo(location: string): Promise<LocationCoordinates | null> {
+    try {
+      // Build a search query — expand state abbreviation for better results
+      // e.g. "York, PA" → search "York Pennsylvania"
+      let query = location.trim();
+      const commaMatch = query.match(/,\s*([a-zA-Z]{2})\s*$/);
+      if (commaMatch) {
+        const abbrev = commaMatch[1].toLowerCase();
+        const fullState = this.stateNames[abbrev];
+        if (fullState) {
+          query = query.replace(/,\s*[a-zA-Z]{2}\s*$/, `, ${fullState}`);
+        }
+      }
+
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+
+      if (!response.ok) return null;
+
+      const data = await response.json();
+      const results: any[] = data.results ?? [];
+      if (results.length === 0) return null;
+
+      // Prefer US results
+      const usResults = results.filter((r: any) => r.country_code === 'US');
+      const best = usResults.length > 0 ? usResults[0] : results[0];
+
+      const coords: LocationCoordinates = {
+        lat: best.latitude,
+        lon: best.longitude,
+        city: best.name ?? location,
+        state: best.admin1 ?? undefined,
+      };
+
+      // Cache in the local map so future sync lookups hit
+      const cacheKey = location.toLowerCase().trim().replace(/\s+/g, ' ');
+      this.locationMap[cacheKey] = coords;
+
+      console.log(`[Geocoding] Open Meteo resolved "${location}" → ${coords.city}, ${coords.state} (${coords.lat}, ${coords.lon})`);
+      return coords;
+    } catch (e) {
+      console.log(`[Geocoding] Open Meteo geocoding failed for "${location}":`, e);
+      return null;
+    }
+  }
+
+  /**
+   * Get coordinates from location string (sync — uses local map only).
+   * Defaults to Harrisburg, PA only when there is no local match.
+   * Prefer getCoordinatesAsync() when possible for full geocoding support.
+   */
+  getCoordinates(location: string): LocationCoordinates {
+    const local = this.lookupLocal(location);
+    if (local) return local;
+
+    console.log(`[Geocoding] Location "${location}" not in local map, defaulting to Harrisburg, PA`);
+    return this.locationMap['harrisburg'];
+  }
+
+  /**
+   * Get coordinates from location string (async — full geocoding).
+   * 1. Checks the local hardcoded map (instant)
+   * 2. Falls back to Open Meteo geocoding API (network call)
+   * 3. Only defaults to Harrisburg if both fail
+   */
+  async getCoordinatesAsync(location: string): Promise<LocationCoordinates> {
+    // Fast path: local map hit
+    const local = this.lookupLocal(location);
+    if (local) return local;
+
+    // Slow path: real geocoding via Open Meteo
+    const remote = await this.geocodeViaOpenMeteo(location);
+    if (remote) return remote;
+
+    // Last resort fallback
+    console.log(`[Geocoding] All geocoding failed for "${location}", defaulting to Harrisburg, PA`);
     return this.locationMap['harrisburg'];
   }
 
@@ -94,20 +186,17 @@ class GeocodingService {
   }
 
   isKnownLocation(location: string): boolean {
-    const normalized = location.toLowerCase().trim().replace(/\s+/g, ' ');
-    if (this.locationMap[normalized]) return true;
-    const cityPart = normalized.split(',')[0]?.trim() ?? normalized;
-    if (cityPart && this.locationMap[cityPart]) return true;
-    for (const [key] of Object.entries(this.locationMap)) {
-      if (STATE_ABBREV_KEYS.has(key)) {
-        if (this.stateAbbrevMatchesLocation(normalized, key)) return true;
-        continue;
-      }
-      if (normalized.includes(key) || key.includes(normalized) || cityPart.includes(key) || key.includes(cityPart)) {
-        return true;
-      }
-    }
-    return false;
+    return this.lookupLocal(location) !== null;
+  }
+
+  /**
+   * Async version: checks local map first, then Open Meteo API.
+   * Returns true if the location can be resolved to real coordinates.
+   */
+  async isKnownLocationAsync(location: string): Promise<boolean> {
+    if (this.lookupLocal(location) !== null) return true;
+    const remote = await this.geocodeViaOpenMeteo(location);
+    return remote !== null;
   }
 
   getAvailableLocations(): string[] {

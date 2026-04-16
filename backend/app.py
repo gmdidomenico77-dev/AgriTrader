@@ -281,7 +281,14 @@ def predict_price(crop):
 
 @app.route('/api/predict/<crop>/graph', methods=['POST'])
 def predict_price_graph(crop):
-    """Get multi-month price forecast anchored to current local elevator bid."""
+    """Get multi-month price forecast anchored to the last historical CSV price.
+
+    The frontend chart concatenates historical CSV prices with predicted prices.
+    To avoid a visible cliff at the transition, we anchor predictions to the
+    last known CSV price (which is the last point the user sees on the chart).
+    The ML model's predicted *trend* (direction and magnitude) is preserved —
+    only the absolute price level shifts to ensure continuity.
+    """
     try:
         data = request.get_json() or {}
         user_location = data.get('location', 'PA')
@@ -295,12 +302,36 @@ def predict_price_graph(crop):
             lon=lon,
         )
 
-        # Fetch local elevator bid and calibrate graph data points
-        local_bid_data, region = _get_usda_bid(crop, lat, lon)
-        if local_bid_data:
-            result['local_bid']        = local_bid_data['average']
-            result['local_bid_region'] = region
-            result = _calibrate_graph_to_local_market(result, local_bid_data['average'])
+        # --- Anchor to last CSV price for chart continuity ---
+        # The chart shows historical CSV prices then predictions; the anchor
+        # must match the historical source so there is no visual jump.
+        csv_anchor = csv_data.get_latest_price(crop, user_location)
+
+        if csv_anchor is not None and csv_anchor > 0:
+            result = _calibrate_graph_to_local_market(result, csv_anchor)
+            result['anchor_source'] = 'csv_historical'
+            result['anchor_price'] = csv_anchor
+            print(f"[GRAPH] Anchored {crop} predictions to CSV last price ${csv_anchor:.2f}")
+        else:
+            # CSV unavailable — fall back to USDA bid so predictions are
+            # at least in the right ballpark vs current market.
+            local_bid_data, region = _get_usda_bid(crop, lat, lon)
+            if local_bid_data:
+                result['local_bid']        = local_bid_data['average']
+                result['local_bid_region'] = region
+                result = _calibrate_graph_to_local_market(result, local_bid_data['average'])
+                result['anchor_source'] = 'usda_bid'
+                print(f"[GRAPH] CSV unavailable; anchored {crop} to USDA bid ${local_bid_data['average']:.2f}")
+            else:
+                result['anchor_source'] = 'ml_raw'
+                print(f"[GRAPH] No anchor available for {crop}; using raw ML output")
+
+        # Include USDA bid for informational display even when CSV is the anchor
+        if 'local_bid' not in result:
+            local_bid_data, region = _get_usda_bid(crop, lat, lon)
+            if local_bid_data:
+                result['local_bid']        = local_bid_data['average']
+                result['local_bid_region'] = region
 
         return jsonify(result)
 

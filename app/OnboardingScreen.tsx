@@ -74,8 +74,10 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      const coords = geocodingService.getCoordinates(profileData.location);
-      const locationRecognized = geocodingService.isKnownLocation(profileData.location);
+      // Use async geocoding: tries local map first, then Open Meteo API,
+      // so locations like "York, PA" get real coordinates instead of Harrisburg.
+      const coords = await geocodingService.getCoordinatesAsync(profileData.location);
+      const locationRecognized = await geocodingService.isKnownLocationAsync(profileData.location);
 
       const save = async () => {
         const success = await updateProfile({

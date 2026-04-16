@@ -3,7 +3,7 @@
 ## Project Overview
 AgriTrader is an AI-powered agricultural marketplace and price forecasting 
 platform. Farmers can view real-time crop prices, get ML-based sell-time 
-recommendations, and buy/sell crops with other users on the marketplace.
+recommendations, and buy/sell crops with other users on the marketplace. The app is intended to take in the user's location, and predict the selling price of corn, soybeans, and wheat based on the weather, economic factors, and recent sales in that specific  area. 
 
 ## Tech Stack
 - Frontend: [React Native]
