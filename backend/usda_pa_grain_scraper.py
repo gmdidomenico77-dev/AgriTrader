@@ -43,89 +43,88 @@ class USDAGrainBidScraper:
         except Exception as e:
             print(f"Error fetching USDA report: {e}")
             return None
-    
+
+    def _parse_bids_from_section(self, section_text, price_min, price_max):
+        """
+        Generic bid parser for any crop section.
+
+        Extracts East/West/Central CURRENT-delivery average prices.
+
+        Handles both:
+          - Range format:  "East Bid ... 4.9300-5.7700 ... 5.3380 5.4025 DLVD-T Current"
+          - Single format: "Central Bid ... 11.1800 DN ... 11.1800 9.9600 DLVD-T Current"
+
+        Key insight: the two decimal numbers immediately before "DLVD" on a Current
+        delivery line are always [avg] [year_ago].  Greedy [^\n]+ backtracks from
+        the right to find them reliably regardless of the line's leading basis text.
+        """
+        bids = {
+            'east':    {'low': None, 'high': None, 'avg': None},
+            'west':    {'low': None, 'high': None, 'avg': None},
+            'central': {'low': None, 'high': None, 'avg': None},
+        }
+
+        # Greedy [^\n]+ forces backtracking from line end so groups 2/3 always
+        # capture the last two full decimal numbers before DLVD (avg and year_ago).
+        # (?<!\d) (negative lookbehind) prevents [^\n]+ from stopping mid-number
+        # — e.g., it can't split "11.7300" into "1" + "1.7300".
+        # [\d]+\.[\d]+ (requires a decimal point) prevents matching a bare digit.
+        # [^\n]*Current ensures we only grab current-delivery lines, not New Crop.
+        bid_pattern = (
+            r'(East|West|Central)\s+Bid(?:\s+Ordinary)?'
+            r'[^\n]+(?<!\d)([\d]+\.[\d]+)\s+([\d]+\.[\d]+)\s+DLVD[^\n]*Current'
+        )
+
+        for match in re.finditer(bid_pattern, section_text, re.IGNORECASE):
+            region = match.group(1).lower()
+            avg = float(match.group(2))
+
+            if not (price_min < avg < price_max):
+                continue
+
+            # Try to extract a low-high range from the line (both values must be
+            # in the valid price band to exclude basis/change numbers like 50.00K).
+            low = high = avg
+            for range_m in re.finditer(r'([\d.]+)-([\d.]+)', match.group(0)):
+                lo = float(range_m.group(1))
+                hi = float(range_m.group(2))
+                if price_min < lo < price_max and price_min < hi < price_max and lo <= hi:
+                    low, high = lo, hi
+                    break
+
+            # Only take the first (Current) match per region; later lines are New Crop
+            if bids[region]['avg'] is None:
+                bids[region] = {'low': low, 'high': high, 'avg': avg}
+
+        return bids
+
     def parse_corn_bids(self, text):
         """Parse corn prices from PDF text"""
-        bids = {
-            'east': {'low': None, 'high': None, 'avg': None},
-            'west': {'low': None, 'high': None, 'avg': None},
-            'central': {'low': None, 'high': None, 'avg': None}
-        }
-        
-        # Pattern matches: Region Bid ... low-high ... average ... DLVD
-        # Example: East Bid 10.00Z to 40.00Z UNCH-UP 5.00 4.2975-4.5975 UP 0.0425-UP 0.0925 4.4475 4.5775 DLVD-T Current
-        corn_pattern = r'(East|West|Central)\s+Bid.*?([\d.]+)-([\d.]+).*?([\d.]+)\s+[\d.]+\s+DLVD'
-        
-        for match in re.finditer(corn_pattern, text, re.IGNORECASE):
-            region = match.group(1).lower()
-            low = float(match.group(2))
-            high = float(match.group(3))
-            avg = float(match.group(4))
-            
-            # Only accept if in reasonable corn price range
-            if 2.0 < avg < 10.0:
-                bids[region] = {'low': low, 'high': high, 'avg': avg}
-        
-        return bids
-    
+        section_match = re.search(
+            r'US #2 Yellow Corn.*?(?=US #1 Soybeans)',
+            text, re.DOTALL | re.IGNORECASE
+        )
+        section = section_match.group(0) if section_match else text
+        return self._parse_bids_from_section(section, 2.0, 10.0)
+
     def parse_soybean_bids(self, text):
         """Parse soybean prices from PDF text"""
-        bids = {
-            'east': {'low': None, 'high': None, 'avg': None},
-            'west': {'low': None, 'high': None, 'avg': None},
-            'central': {'low': None, 'high': None, 'avg': None}
-        }
-        
-        # Find soybeans section first
-        soy_section = re.search(r'US #1 Soybeans.*?Country Elevators - Organic', text, re.DOTALL | re.IGNORECASE)
-        
-        if soy_section:
-            section_text = soy_section.group(0)
-            # Pattern: Region Bid ... low-high ... average
-            # Example: East Bid -40.00X to -25.00X UNCH-DN 5.00 9.8200-9.9700 UP 0.2025-UP 0.1525 9.8950 DLVD-T Current
-            soy_pattern = r'(East|West|Central)\s+Bid.*?([\d.]+)-([\d.]+).*?([\d.]+)\s+DLVD'
-            
-            for match in re.finditer(soy_pattern, section_text, re.IGNORECASE):
-                region = match.group(1).lower()
-                low = float(match.group(2))
-                high = float(match.group(3))
-                avg = float(match.group(4))
-                
-                # Only accept if in reasonable soybean price range
-                if 7.0 < avg < 20.0:
-                    bids[region] = {'low': low, 'high': high, 'avg': avg}
-        
-        return bids
-    
+        section_match = re.search(
+            r'US #1 Soybeans.*?(?=US #1 Soft Red Winter Wheat)',
+            text, re.DOTALL | re.IGNORECASE
+        )
+        section = section_match.group(0) if section_match else text
+        return self._parse_bids_from_section(section, 7.0, 20.0)
+
     def parse_wheat_bids(self, text):
         """Parse wheat prices from PDF text"""
-        bids = {
-            'east': {'low': None, 'high': None, 'avg': None},
-            'west': {'low': None, 'high': None, 'avg': None},
-            'central': {'low': None, 'high': None, 'avg': None}
-        }
-        
-        # Find wheat section
-        wheat_section = re.search(r'US #1 Soft Red Winter Wheat.*?Country Elevators - Organic', text, re.DOTALL | re.IGNORECASE)
-        
-        if wheat_section:
-            section_text = wheat_section.group(0)
-            # Pattern: Region Bid Ordinary ... low-high ... average
-            # Example: East Bid Ordinary -75.00Z to 85.00Z UP 5.00 4.3175-5.9175 UP 0.0375 5.0008 5.7600 DLVD-T Current
-            wheat_pattern = r'(East|West|Central)\s+Bid\s+Ordinary.*?([\d.]+)-([\d.]+).*?([\d.]+)\s+[\d.]+\s+DLVD'
-            
-            for match in re.finditer(wheat_pattern, section_text, re.IGNORECASE):
-                region = match.group(1).lower()
-                low = float(match.group(2))
-                high = float(match.group(3))
-                avg = float(match.group(4))
-                
-                # Only accept if in reasonable wheat price range
-                if 3.0 < avg < 12.0:
-                    bids[region] = {'low': low, 'high': high, 'avg': avg}
-        
-        return bids
-    
+        section_match = re.search(
+            r'US #1 Soft Red Winter Wheat.*?(?=Explanatory Notes|$)',
+            text, re.DOTALL | re.IGNORECASE
+        )
+        section = section_match.group(0) if section_match else text
+        return self._parse_bids_from_section(section, 3.0, 12.0)
+
     def _refresh_cache(self):
         """Fetch + parse the USDA report, update _bid_cache. Returns True on success."""
         pdf_data = self.fetch_latest_report()
@@ -141,6 +140,9 @@ class USDAGrainBidScraper:
             }
             self._cache_ts = time.time()
             print(f"[USDA] Report parsed and cached.")
+            print(f"[USDA] Corn bids: {self._bid_cache['corn']}")
+            print(f"[USDA] Soybean bids: {self._bid_cache['soybeans']}")
+            print(f"[USDA] Wheat bids: {self._bid_cache['wheat']}")
             return True
         except Exception as e:
             print(f"Error parsing USDA report: {e}")
@@ -178,21 +180,20 @@ class USDAGrainBidScraper:
                 'date': datetime.now().strftime('%Y-%m-%d'),
             }
         return None
-    
+
     def get_all_regional_bids(self, crop):
         """Get bids for all PA regions (single cache fetch)."""
         return [b for b in (self.get_local_bids(crop, r) for r in ('east', 'central', 'west')) if b]
-    
+
     def get_statewide_average(self, crop):
         """Calculate PA statewide average from regional bids"""
         regional_bids = self.get_all_regional_bids(crop)
-        
+
         if not regional_bids:
             return None
-        
-        # Calculate weighted average (you could weight by region if you have data)
+
         avg_price = sum(bid['average'] for bid in regional_bids) / len(regional_bids)
-        
+
         return {
             'crop': crop,
             'statewide_average': round(avg_price, 2),
