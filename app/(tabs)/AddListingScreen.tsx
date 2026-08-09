@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useListings } from "../../components/ListingsContext";
 import { useUserProfile } from "../../components/UserProfileContext";
+import { showAlert } from "../../lib/crossPlatformAlert";
 
 const AddListingScreen = () => {
   const { addListing } = useListings();
@@ -62,7 +63,7 @@ const AddListingScreen = () => {
       });
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
+      showAlert(
         "Listing Posted! ✓",
         `Your ${cropName} listing is now live in the marketplace.`,
         [

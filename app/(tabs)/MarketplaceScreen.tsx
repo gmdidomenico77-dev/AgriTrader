@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager, Animated } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, LayoutAnimation, Platform, UIManager, Animated } from "react-native";
 import { colors } from "../../constants/theme";
 import * as Haptics from "expo-haptics";
 
@@ -9,6 +9,7 @@ if (Platform.OS === 'android') {
 import { Ionicons } from "@expo/vector-icons";
 import { usePreorders } from "../../components/PreordersContext";
 import { useListings } from "../../components/ListingsContext";
+import { showAlert } from "../../lib/crossPlatformAlert";
 
 interface Listing {
   id: string;
@@ -137,7 +138,7 @@ const MarketplaceScreen = () => {
 
   const handlePreorder = async (listing: Listing) => {
     if (isPreordered(listing.id)) {
-      Alert.alert("Already Pre-ordered", "You've already pre-ordered this item.");
+      showAlert("Already Pre-ordered", "You've already pre-ordered this item.");
       return;
     }
 
@@ -152,7 +153,7 @@ const MarketplaceScreen = () => {
         location: listing.location,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Pre-order Confirmed!", `You've pre-ordered ${listing.crop} from ${listing.seller}`);
+      showAlert("Pre-order Confirmed!", `You've pre-ordered ${listing.crop} from ${listing.seller}`);
     } finally {
       setPreorderingId(null);
     }

@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Animated,
+  Linking,
 } from "react-native";
 import { colors, confidenceColor } from "../../constants/theme";
 import { LineChart } from "react-native-chart-kit";
@@ -476,6 +477,41 @@ const ForecastScreen = () => {
           <Text style={styles.localBidRange}>
             Current cash bid used to anchor price forecast
           </Text>
+          {prediction.local_bid_source_url && (
+            <TouchableOpacity
+              onPress={() => Linking.openURL(prediction.local_bid_source_url!)}
+              style={styles.sourceLink}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="open-outline" size={13} color="#2d5016" />
+              <Text style={styles.sourceLinkText}>
+                View source: {prediction.local_bid_source || "USDA AMS Report"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* What's driving this forecast — real per-crop feature importance from the
+          trained model, paired with each factor's actual current reading. */}
+      {prediction?.drivers != null && prediction.drivers.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>What's Driving This Forecast</Text>
+          <Text style={styles.driversSubtitle}>
+            Ranked by how much weight the model places on each factor
+          </Text>
+          {prediction.drivers.map((driver) => (
+            <View key={driver.key} style={styles.driverRow}>
+              <View style={styles.driverHeaderRow}>
+                <Text style={styles.driverLabel}>{driver.label}</Text>
+                <Text style={styles.driverPct}>{driver.importance_pct.toFixed(0)}%</Text>
+              </View>
+              <View style={styles.driverBarTrack}>
+                <View style={[styles.driverBarFill, { width: `${Math.min(100, driver.importance_pct)}%` }]} />
+              </View>
+              <Text style={styles.driverDetail}>{driver.detail}</Text>
+            </View>
+          ))}
         </View>
       )}
 
@@ -797,6 +833,59 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6b7280",
     marginTop: 2,
+  },
+  sourceLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 10,
+  },
+  sourceLinkText: {
+    fontSize: 12,
+    color: "#2d5016",
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
+  driversSubtitle: {
+    fontSize: 12,
+    color: "#9ca3af",
+    marginBottom: 14,
+    marginTop: -4,
+  },
+  driverRow: {
+    marginBottom: 14,
+  },
+  driverHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  driverLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1f2937",
+  },
+  driverPct: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#2d5016",
+  },
+  driverBarTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#f3f4f6",
+    overflow: "hidden",
+    marginBottom: 5,
+  },
+  driverBarFill: {
+    height: "100%",
+    borderRadius: 3,
+    backgroundColor: "#2d5016",
+  },
+  driverDetail: {
+    fontSize: 12,
+    color: "#6b7280",
   },
   bottomPadding: {
     height: 24,

@@ -508,6 +508,76 @@ class AgriTraderAPI:
         price = world.get(key)
         return price if price else None
 
+    # Groups the model's real per-feature importances (persisted at training
+    # time in feature_importance[crop], including the crop-weighted/seasonal
+    # engineered columns from create_crop_specific_features) into farmer-facing
+    # categories, so "what's driving this forecast" reflects the actual trained
+    # model rather than a simulated/fabricated explanation.
+    _DRIVER_GROUPS = [
+        {
+            'key': 'weather',
+            'label': 'Weather Conditions',
+            'features': ['temperature_2m_max', 'precipitation_sum', 'gdd_cumulative', 'drought_index',
+                         'temperature_weighted', 'precipitation_weighted', 'gdd_weighted', 'drought_weighted'],
+        },
+        {
+            'key': 'world_price',
+            'label': 'World Futures Price (CBOT)',
+            'features': ['corn_world_price', 'soy_world_price', 'wheat_world_price', 'world_price_weighted'],
+        },
+        {
+            'key': 'economic',
+            'label': 'Economic Conditions',
+            'features': ['10yr_treasury', 'unemployment_rate', 'cpi', 'usd_eur', 'economic_weighted'],
+        },
+        {
+            'key': 'seasonal',
+            'label': 'Seasonal Timing',
+            'features': ['seasonal_sin', 'seasonal_cos', 'day_of_year'],
+        },
+    ]
+
+    def _describe_driver(self, key, features, crop):
+        if key == 'weather':
+            return (f"{features.get('temperature_2m_max', 0):.0f}°F max temp, "
+                     f"{features.get('precipitation_sum', 0):.2f}\" recent rain, "
+                     f"drought index {features.get('drought_index', 0):.1f}")
+        if key == 'world_price':
+            wk = self._CROP_TO_WORLD_KEY.get(crop, 'corn_world_price')
+            val = features.get(wk, 0)
+            return f"${val:.2f}/bu CBOT futures" if val else "CBOT futures unavailable right now"
+        if key == 'economic':
+            return (f"10-yr Treasury {features.get('10yr_treasury', 0):.2f}%, "
+                     f"unemployment {features.get('unemployment_rate', 0):.1f}%")
+        if key == 'seasonal':
+            doy = int(features.get('day_of_year', 0))
+            return f"Day {doy} of the marketing year"
+        return ""
+
+    def get_prediction_drivers(self, crop, features):
+        """Rank the real factor groups the trained model weighs most heavily
+        for this crop, each paired with its actual current reading. Returns
+        [] when no persisted feature_importance exists for this crop."""
+        importances = self.ml_models.feature_importance.get(crop, {})
+        if not importances:
+            return []
+
+        total = sum(importances.values()) or 1.0
+        groups = []
+        for group in self._DRIVER_GROUPS:
+            weight = sum(importances.get(f, 0) for f in group['features'])
+            if weight <= 0:
+                continue
+            groups.append({
+                'key': group['key'],
+                'label': group['label'],
+                'importance_pct': round(100 * weight / total, 1),
+                'detail': self._describe_driver(group['key'], features, crop),
+            })
+
+        groups.sort(key=lambda g: g['importance_pct'], reverse=True)
+        return groups
+
     def predict_crop_price(self, crop, user_location, prediction_days=1, lat=None, lon=None):
         """
         Main prediction function for the app
@@ -550,6 +620,7 @@ class AgriTraderAPI:
             prediction['location'] = location_code or user_location
             prediction['recommendation'] = self.get_recommendation(prediction)
             prediction['market_analysis'] = self.get_market_analysis(crop, prediction)
+            prediction['drivers'] = self.get_prediction_drivers(crop, features)
             
             return prediction
             

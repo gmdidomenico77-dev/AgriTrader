@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, Animated, RefreshControl } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, Platform, Animated, RefreshControl } from "react-native";
 import { colors, confidenceColor } from "../../constants/theme";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +10,7 @@ import { weatherService, WeatherData, WeatherAlert } from "../../lib/weatherServ
 import { marketPricesService, CropPrice } from "../../lib/marketPricesService";
 import { historicalDataService } from "../../lib/historicalDataService";
 import { predictionService } from "../../lib/predictionService";
+import { showAlert } from "../../lib/crossPlatformAlert";
 
 const SkeletonPriceRow = () => {
   const pulse = useRef(new Animated.Value(0.35)).current;
@@ -155,7 +156,7 @@ const HomeScreen = () => {
   const handleCreateAlert = async () => {
     const targetPrice = parseFloat(newAlert.targetPrice);
     if (isNaN(targetPrice) || targetPrice <= 0) {
-      Alert.alert('Invalid Price', 'Please enter a valid price');
+      showAlert('Invalid Price', 'Please enter a valid price');
       return;
     }
 
@@ -168,7 +169,7 @@ const HomeScreen = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowAlertModal(false);
     setNewAlert({ crop: 'Corn', condition: 'above', targetPrice: '' });
-    Alert.alert('Alert Created', `You'll be notified when ${newAlert.crop} goes ${newAlert.condition} $${targetPrice}`);
+    showAlert('Alert Created', `You'll be notified when ${newAlert.crop} goes ${newAlert.condition} $${targetPrice}`);
   };
 
   return (
@@ -203,7 +204,7 @@ const HomeScreen = () => {
           onPress={() => {
             if (weather) {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              Alert.alert(
+              showAlert(
                 `Weather — ${profile?.location || 'PA'}`,
                 `${weather.description || 'Clear'}\n\nTemperature: ${weather.temp || '--'}°F\nFeels like: ${weather.feelsLike ?? weather.temp ?? '--'}°F\nHumidity: ${weather.humidity ?? '--'}%\nWind: ${weather.windSpeed ?? '--'} mph`,
                 [{ text: 'Close' }]
@@ -237,22 +238,28 @@ const HomeScreen = () => {
               <Text style={styles.cropName}>{item.crop}</Text>
               <View style={styles.priceContainer}>
                 <View style={styles.priceColumn}>
-                  <Text style={styles.priceLabel}>National</Text>
+                  <Text style={styles.priceLabel}>National{item.nationalIsEstimated ? ' (est.)' : ''}</Text>
                   <Text style={styles.price}>${item.nationalPrice.toFixed(2)}</Text>
                 </View>
                 <View style={styles.priceColumn}>
-                  <Text style={styles.priceLabel}>Local</Text>
+                  <Text style={styles.priceLabel}>Local{item.isStale ? ' ⚠' : ''}</Text>
                   <Text style={styles.price}>${item.localPrice.toFixed(2)}</Text>
                 </View>
                 <Text style={[styles.change, { color: item.change >= 0 ? colors.up : colors.down }]}>
                   {item.change >= 0 ? '+' : ''}{item.change.toFixed(1)}%
                 </Text>
               </View>
+              {item.isStale && (
+                <Text style={styles.staleNote}>
+                  Local price may be a few days old — live elevator data unavailable right now
+                </Text>
+              )}
             </View>
           ))}
         <View style={styles.priceFooter}>
           <Text style={styles.priceNote}>
             Per-bushel cash prices · {profile?.location || 'PA'}
+            {prices[0]?.localSource === 'usda_bid' ? ' · Local: live USDA elevator bid' : ''}
           </Text>
           {pricesUpdatedAt && (
             <Text style={styles.priceTimestamp}>
@@ -510,6 +517,11 @@ const styles = StyleSheet.create({
   priceTimestamp: {
     fontSize: 11,
     color: "#d1d5db",
+  },
+  staleNote: {
+    fontSize: 11,
+    color: "#b45309",
+    marginTop: 2,
   },
   alertCard: {
     borderLeftWidth: 4,

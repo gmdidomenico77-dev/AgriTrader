@@ -1,6 +1,12 @@
 /**
  * Market Prices Service
- * Local cash prices from bundled data.csv; "National" is estimated as local minus PA-style basis.
+ * Local cash price comes from the backend (live USDA elevator bid when
+ * available, else bundled CSV). National price is fetched live from the
+ * backend's CBOT futures feed — NOT reconstructed from the local price,
+ * since that reconstruction just reproduces whatever the local number
+ * happened to be (which may be stale) rather than today's actual futures price.
+ * The reconstruction is used only as a last-resort estimate when the app is
+ * fully offline and running on the bundled CSV alone.
  */
 
 import { csvDataService } from './csvDataService';
@@ -42,6 +48,21 @@ export interface CropPrice {
   localPrice: number;
   change: number;
   timestamp: string;
+  /** True when the local price's underlying data is more than a few days old. */
+  isStale: boolean;
+  /** True when nationalPrice is a reconstructed estimate (basis math), not a live CBOT fetch. */
+  nationalIsEstimated: boolean;
+  /** Where the local price actually came from: 'usda_bid' | 'csv_data' | 'yahoo_finance'. */
+  localSource?: string;
+}
+
+interface BackendCurrentPriceResponse {
+  current_price?: number;
+  local_price?: number;
+  national_price?: number | null;
+  local_price_source?: string;
+  is_stale?: boolean;
+  price_date?: string;
 }
 
 class MarketPricesService {
@@ -51,9 +72,6 @@ class MarketPricesService {
     wheat: -0.2,
   };
 
-  /**
-   * National ≈ local cash − basis (basis negative ⇒ national above local).
-   */
   async getCurrentPrices(location: string = 'PA'): Promise<CropPrice[]> {
     try {
       const crops = [
@@ -71,19 +89,34 @@ class MarketPricesService {
               fetch(`${API_BASE_URL}/historical/${crop.key}?days=2&location=${encodeURIComponent(location)}`),
             ]);
             if (!currentRes.ok) return null;
-            const currentData = (await currentRes.json()) as { current_price?: number };
+            const currentData = (await currentRes.json()) as BackendCurrentPriceResponse;
             const histData = histRes.ok
               ? ((await histRes.json()) as { prices?: Array<{ price: number }> })
               : {};
-            const localPrice = Number(currentData.current_price ?? 0);
+            const localPrice = Number(currentData.local_price ?? currentData.current_price ?? 0);
             if (!Number.isFinite(localPrice) || localPrice <= 0) return null;
+
+            const liveNational = currentData.national_price;
+            const nationalIsEstimated = !(Number.isFinite(liveNational) && (liveNational as number) > 0);
+            const nationalPrice = nationalIsEstimated
+              ? Number((localPrice - crop.basis).toFixed(2))
+              : Number((liveNational as number).toFixed(2));
+
             const prices = histData.prices ?? [];
             const prev = prices.length >= 2 ? prices[prices.length - 2]?.price : null;
             const change =
               prev && Number.isFinite(prev) && prev > 0
                 ? Number((((localPrice - prev) / prev) * 100).toFixed(2))
                 : 0;
-            return { crop, localPrice, change };
+            return {
+              crop,
+              localPrice,
+              nationalPrice,
+              nationalIsEstimated,
+              change,
+              isStale: !!currentData.is_stale,
+              localSource: currentData.local_price_source,
+            };
           } catch {
             return null;
           }
@@ -95,12 +128,15 @@ class MarketPricesService {
         const ts = new Date().toISOString();
         return liveRows
           .filter((row): row is NonNullable<typeof row> => row !== null)
-          .map(({ crop, localPrice, change }) => ({
+          .map(({ crop, localPrice, nationalPrice, nationalIsEstimated, change, isStale, localSource }) => ({
             crop: crop.label,
-            nationalPrice: Number((localPrice - crop.basis).toFixed(2)),
+            nationalPrice,
             localPrice: Number(localPrice.toFixed(2)),
             change,
             timestamp: ts,
+            isStale,
+            nationalIsEstimated,
+            localSource,
           }));
       }
 
@@ -124,6 +160,8 @@ class MarketPricesService {
       const adjSoy = Number((soy * locationRatio('soybeans', stateCode)).toFixed(2));
       const adjWheat = Number((wheat * locationRatio('wheat', stateCode)).toFixed(2));
 
+      // Fully offline: national is a reconstructed estimate and local is whatever
+      // the bundled CSV last shipped with — both flagged so the UI can be honest.
       const national = (local: number, basis: number) =>
         Number((local - basis).toFixed(2));
 
@@ -135,6 +173,9 @@ class MarketPricesService {
           localPrice: adjCorn,
           change: chCorn,
           timestamp: ts,
+          isStale: true,
+          nationalIsEstimated: true,
+          localSource: 'bundled_csv',
         },
         {
           crop: 'Soybeans',
@@ -142,6 +183,9 @@ class MarketPricesService {
           localPrice: adjSoy,
           change: chSoy,
           timestamp: ts,
+          isStale: true,
+          nationalIsEstimated: true,
+          localSource: 'bundled_csv',
         },
         {
           crop: 'Wheat',
@@ -149,6 +193,9 @@ class MarketPricesService {
           localPrice: adjWheat,
           change: chWheat,
           timestamp: ts,
+          isStale: true,
+          nationalIsEstimated: true,
+          localSource: 'bundled_csv',
         },
       ];
     } catch (error) {

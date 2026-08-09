@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -15,6 +14,7 @@ import { useUserProfile } from '../components/UserProfileContext';
 import LocationAutocomplete from '../components/LocationAutocomplete';
 import { LocationCandidate } from '../lib/geocodingService';
 import { colors } from '../constants/theme';
+import { showAlert } from '../lib/crossPlatformAlert';
 
 interface OnboardingScreenProps {
   onComplete: (profileData: UserProfile) => void;
@@ -62,15 +62,15 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
 
   const handleNext = async () => {
     if (currentStep === 1 && !profileData.displayName.trim()) {
-      Alert.alert('Required Field', 'Please enter your display name');
+      showAlert('Required Field', 'Please enter your display name');
       return;
     }
     if (currentStep === 2 && !selectedLocation) {
-      Alert.alert('Please Select a Location', 'Start typing your city and choose it from the list.');
+      showAlert('Please Select a Location', 'Start typing your city and choose it from the list.');
       return;
     }
     if (currentStep === 3 && !profileData.farmName.trim()) {
-      Alert.alert('Required Field', 'Please enter your farm name');
+      showAlert('Required Field', 'Please enter your farm name');
       return;
     }
 
@@ -95,7 +95,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       if (success) {
         onComplete({ ...profileData, location: selectedLocation!.label });
       } else {
-        Alert.alert('Error', 'Failed to save profile. Please try again.');
+        showAlert('Error', 'Failed to save profile. Please try again.');
       }
     }
   };
@@ -213,7 +213,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <View style={styles.progressBar}>
             <View 

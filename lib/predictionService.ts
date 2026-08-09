@@ -13,6 +13,14 @@ export interface PredictionData {
   fallback_used?: boolean;
   local_bid?: number;
   local_bid_region?: string;
+  local_bid_source?: string;
+  local_bid_source_url?: string;
+  drivers?: Array<{
+    key: string;
+    label: string;
+    importance_pct: number;
+    detail: string;
+  }>;
   recommendation: {
     action: string;
     confidence: string;

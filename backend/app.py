@@ -18,7 +18,7 @@ sys.path.insert(0, current_dir)
 
 os.chdir(ml_proj_dir)
 
-from AgriTrader_API import AgriTraderAPI
+from AgriTrader_API import AgriTraderAPI, _normalize_location_code
 from historical_data_fetcher import historical_fetcher
 from csv_historical_data import csv_data
 from usda_pa_grain_scraper import usda_scraper
@@ -168,16 +168,19 @@ def _get_usda_bid(crop: str, lat, lon):
 def _get_anchor_price(crop: str, user_location: str, lat, lon):
     """Get the best available real-world price to anchor ML predictions.
 
-    Priority: CSV historical (same source the chart shows) > USDA bid > None.
+    Priority: USDA bid (live, PA only, refreshed at most every 12h) > CSV
+    historical > None. The CSV is a static file only refreshed by a daily
+    job that depends on yfinance (prone to rate-limiting/failure), so it's
+    the fallback rather than the primary source whenever a live bid exists.
     Returns (price, source_label) or (None, None).
     """
-    csv_price = csv_data.get_latest_price(crop, user_location)
-    if csv_price is not None and csv_price > 0:
-        return csv_price, 'csv_historical'
-
     bid_data, _region = _get_usda_bid(crop, lat, lon)
     if bid_data:
         return bid_data['average'], 'usda_bid'
+
+    csv_price = csv_data.get_latest_price(crop, user_location)
+    if csv_price is not None and csv_price > 0:
+        return csv_price, 'csv_historical'
 
     return None, None
 
@@ -333,6 +336,7 @@ def predict_price(crop):
             result['local_bid_high']   = local_bid_data.get('high')
             result['local_bid_region'] = region
             result['local_bid_source'] = 'USDA AMS PA Grain Report'
+            result['local_bid_source_url'] = usda_scraper.REPORT_URL
             print(f"[USDA BID] {crop} ({region} PA): ${local_bid_data['average']:.2f}")
 
         # Calibrate: anchor to current market, preserve ML model signal, and
@@ -466,21 +470,64 @@ def get_historical_data(crop):
 
 @app.route('/api/current/<crop>', methods=['GET'])
 def get_current_price(crop):
-    """Get current market price for a crop - Uses REAL PA data!"""
+    """Get current market price for a crop.
+
+    Local price priority: live USDA elevator bid (PA only, refreshed at most
+    every 12h) > bundled CSV cash price > Yahoo Finance. The CSV is a known
+    weak link — it's only updated by a daily job that depends on yfinance,
+    which is prone to rate-limiting, so a CSV-sourced price is flagged
+    `is_stale` if its date is more than 4 days old rather than silently
+    presented as current.
+
+    National price is fetched independently and live (`api.get_world_price`)
+    instead of being reconstructed from the local price with a hardcoded
+    basis constant — that reconstruction only reproduces whatever the local
+    number happened to be (stale or not), it isn't actually today's futures price.
+    """
     try:
         location = request.args.get('location', 'PA', type=str)
-        
-        # Get most recent price from YOUR CSV
-        price = csv_data.get_latest_price(crop, location)
-        source = "csv_data"
+        location_code = _normalize_location_code(location)
 
-        # Fallback to Yahoo Finance if CSV unavailable
+        price = None
+        price_date = None
+        source = None
+
+        if location_code == 'PA':
+            try:
+                statewide = usda_scraper.get_statewide_average(crop)
+                if statewide:
+                    price = statewide['statewide_average']
+                    price_date = statewide.get('date')
+                    source = 'usda_bid'
+            except Exception as e:
+                print(f"[WARNING] USDA statewide average failed: {e}")
+
+        if price is None:
+            recent = csv_data.get_historical_prices(crop, days=1, location=location)
+            if recent:
+                price = recent[-1]['price']
+                price_date = recent[-1]['date']
+                source = 'csv_data'
+
         if price is None:
             price = historical_fetcher.get_current_price(crop, location)
-            source = "yahoo_finance"
+            source = 'yahoo_finance'
 
         if price is None:
             return jsonify({'error': 'Could not fetch current price'}), 500
+
+        # USDA bids are fetched live on every cache miss, so treat them as
+        # never stale even though the scraper's own `date` field is just
+        # "when we last scraped," not the report's true publish date.
+        is_stale = False
+        if source == 'csv_data' and price_date:
+            try:
+                age_days = (datetime.now() - datetime.strptime(str(price_date)[:10], '%Y-%m-%d')).days
+                is_stale = age_days > 4
+            except Exception:
+                pass
+
+        national_price = api.get_world_price(crop)
 
         # Get statistics for context
         stats = csv_data.get_price_statistics(crop, days=30)
@@ -489,11 +536,16 @@ def get_current_price(crop):
             'crop': crop,
             'location': location,
             'current_price': price,
+            'local_price': price,
+            'local_price_source': source,
+            'national_price': national_price,
+            'price_date': price_date,
+            'is_stale': is_stale,
             'statistics': stats,
             'timestamp': 'latest_available',
             'source': source,
         })
-        
+
     except Exception as e:
         return jsonify({
             'error': f'Current price fetch failed: {str(e)}'

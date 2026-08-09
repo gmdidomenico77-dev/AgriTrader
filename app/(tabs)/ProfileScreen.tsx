@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as Haptics from "expo-haptics";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, Switch } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, Platform, Switch } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { geocodingService } from "../../lib/geocodingService";
+import { LocationCandidate } from "../../lib/geocodingService";
+import LocationAutocomplete from "../../components/LocationAutocomplete";
 import { useUserProfile } from "../../components/UserProfileContext";
 import { useAuth } from "../../components/AuthContext";
 import { useListings } from "../../components/ListingsContext";
 import { useAlerts, PriceAlert } from "../../components/AlertsContext";
 import { usePreorders } from "../../components/PreordersContext";
 import { signOutUser } from "../../lib/authService";
+import { showAlert } from "../../lib/crossPlatformAlert";
 
 function useCountUp(target: number, duration = 700) {
   const [value, setValue] = useState(0);
@@ -50,6 +52,24 @@ const ProfileScreen = () => {
     location: profile?.location || "",
     displayName: profile?.displayName || "",
   });
+  const [editSelectedLocation, setEditSelectedLocation] = useState<LocationCandidate | null>(null);
+
+  /** Build a LocationCandidate from the profile's already-saved coordinates,
+   * so editing farm name / display name doesn't force a location re-pick. */
+  const locationCandidateFromProfile = (): LocationCandidate | null => {
+    if (!profile?.location || profile.latitude == null || profile.longitude == null) return null;
+    return {
+      id: `${profile.latitude}_${profile.longitude}`,
+      label: profile.location,
+      city: profile.locationCity || profile.location,
+      state: profile.locationState,
+      stateCode: profile.locationStateCode,
+      country: profile.locationCountry || "United States",
+      lat: profile.latitude,
+      lon: profile.longitude,
+      isPA: profile.isPaSupported ?? false,
+    };
+  };
 
   const [alertEditData, setAlertEditData] = useState({
     crop: "",
@@ -107,28 +127,36 @@ const ProfileScreen = () => {
       location: profile?.location || "",
       displayName: profile?.displayName || "",
     });
+    setEditSelectedLocation(locationCandidateFromProfile());
     setShowEditModal(true);
   };
 
   const handleSaveProfile = async () => {
     if (!editFormData.farmName.trim() || !editFormData.location.trim()) {
-      Alert.alert("Missing Information", "Please fill in all fields");
+      showAlert("Missing Information", "Please fill in all fields");
+      return;
+    }
+    if (!editSelectedLocation) {
+      showAlert("Please Select a Location", "Start typing your city and choose it from the list.");
       return;
     }
 
-    // Re-geocode so the stored lat/lon always matches the current location string
-    const coords = await geocodingService.getCoordinatesAsync(editFormData.location);
     await updateProfile({
       farmName: editFormData.farmName,
-      location: editFormData.location,
+      location: editSelectedLocation.label,
       displayName: editFormData.displayName,
-      latitude: coords.lat,
-      longitude: coords.lon,
+      locationCity: editSelectedLocation.city,
+      locationState: editSelectedLocation.state,
+      locationStateCode: editSelectedLocation.stateCode,
+      locationCountry: editSelectedLocation.country,
+      isPaSupported: editSelectedLocation.isPA,
+      latitude: editSelectedLocation.lat,
+      longitude: editSelectedLocation.lon,
     });
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowEditModal(false);
-    Alert.alert("Profile Updated ✓", "Your profile has been updated successfully");
+    showAlert("Profile Updated ✓", "Your profile has been updated successfully");
   };
 
   const handleAlertClick = (alert: PriceAlert) => {
@@ -146,7 +174,7 @@ const ProfileScreen = () => {
 
     const targetPrice = parseFloat(alertEditData.targetPrice);
     if (isNaN(targetPrice) || targetPrice <= 0) {
-      Alert.alert("Invalid Price", "Please enter a valid price");
+      showAlert("Invalid Price", "Please enter a valid price");
       return;
     }
 
@@ -158,13 +186,13 @@ const ProfileScreen = () => {
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowAlertModal(false);
-    Alert.alert("Alert Updated ✓", "Your price alert has been updated");
+    showAlert("Alert Updated ✓", "Your price alert has been updated");
   };
 
   const handleDeleteAlert = async () => {
     if (!selectedAlert) return;
 
-    Alert.alert(
+    showAlert(
       "Delete Alert",
       "Are you sure you want to delete this alert?",
       [
@@ -175,7 +203,7 @@ const ProfileScreen = () => {
           onPress: async () => {
             await removeAlert(selectedAlert.id);
             setShowAlertModal(false);
-            Alert.alert("Alert Deleted", "Price alert has been removed");
+            showAlert("Alert Deleted", "Price alert has been removed");
           },
         },
       ]
@@ -183,7 +211,7 @@ const ProfileScreen = () => {
   };
 
   const handleSignOut = async () => {
-    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+    showAlert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign Out",
@@ -191,7 +219,7 @@ const ProfileScreen = () => {
         onPress: async () => {
           const result = await signOutUser();
           if (!result.success) {
-            Alert.alert("Error", "Failed to sign out. Please try again.");
+            showAlert("Error", "Failed to sign out. Please try again.");
           }
         },
       },
@@ -349,13 +377,17 @@ const ProfileScreen = () => {
             />
 
             <Text style={styles.inputLabel}>Location</Text>
-            <TextInput
-              style={[styles.input, editFocusedField === "location" && styles.inputFocused]}
+            <LocationAutocomplete
               value={editFormData.location}
-              onChangeText={(text) => setEditFormData({ ...editFormData, location: text })}
-              onFocus={() => setEditFocusedField("location")}
-              onBlur={() => setEditFocusedField(null)}
-              placeholder="PA"
+              onChangeText={(text) => {
+                setEditFormData({ ...editFormData, location: text });
+                setEditSelectedLocation(null); // editing after a pick invalidates the prior selection
+              }}
+              onSelect={(candidate) => {
+                setEditSelectedLocation(candidate);
+                setEditFormData({ ...editFormData, location: candidate.label });
+              }}
+              placeholder="Start typing your city, e.g. Erie"
             />
 
             <Text style={styles.infoNote}>
