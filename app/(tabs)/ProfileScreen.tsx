@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal, TextInput, KeyboardAvoidingView, Platform, Switch } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import { geocodingService } from "../../lib/geocodingService";
 import { useUserProfile } from "../../components/UserProfileContext";
 import { useAuth } from "../../components/AuthContext";
 import { useListings } from "../../components/ListingsContext";
@@ -115,10 +116,14 @@ const ProfileScreen = () => {
       return;
     }
 
+    // Re-geocode so the stored lat/lon always matches the current location string
+    const coords = await geocodingService.getCoordinatesAsync(editFormData.location);
     await updateProfile({
       farmName: editFormData.farmName,
       location: editFormData.location,
       displayName: editFormData.displayName,
+      latitude: coords.lat,
+      longitude: coords.lon,
     });
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

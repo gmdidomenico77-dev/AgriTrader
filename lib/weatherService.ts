@@ -34,8 +34,9 @@ class WeatherService {
         lon = userLon;
         console.log(`[Weather API] Using user coordinates: (${lat}, ${lon})`);
       } else {
-        // Geocode the location string to get coordinates
-        const coords = geocodingService.getCoordinates(location);
+        // Geocode the location string to get coordinates — async so Open Meteo
+        // geocoding is tried before falling back to Harrisburg
+        const coords = await geocodingService.getCoordinatesAsync(location);
         lat = coords.lat;
         lon = coords.lon;
         console.log(`[Weather API] Geocoded "${location}" to ${coords.city}, ${coords.state} (${lat}, ${lon})`);
@@ -112,12 +113,12 @@ class WeatherService {
   /**
    * Check for weather alerts
    */
-  async getWeatherAlerts(location: string = 'PA'): Promise<WeatherAlert[]> {
+  async getWeatherAlerts(location: string = 'PA', userLat?: number, userLon?: number): Promise<WeatherAlert[]> {
     try {
       const alerts: WeatherAlert[] = [];
-      
+
       // For demo: Check current conditions and generate alerts
-      const weather = await this.getCurrentWeather(location);
+      const weather = await this.getCurrentWeather(location, userLat, userLon);
       
       if (weather) {
         // Heavy rain alert

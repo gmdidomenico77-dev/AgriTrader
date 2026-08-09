@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager } from "react-native";
+import React, { useState, useRef, useEffect } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager, Animated } from "react-native";
+import { colors } from "../../constants/theme";
 import * as Haptics from "expo-haptics";
 
 if (Platform.OS === 'android') {
@@ -22,9 +23,76 @@ interface Listing {
   isUserListing?: boolean;
 }
 
+const SEED_LISTINGS: Listing[] = [
+  {
+    id: "seed-1",
+    crop: "Corn",
+    quantity: "5,000 bu",
+    price: "$4.85/bu",
+    pricePerUnit: 4.85,
+    location: "Lancaster, PA",
+    seller: "Miller Farm",
+    availableDate: "Apr 21",
+    quality: "Grade A",
+    isUserListing: false,
+  },
+  {
+    id: "seed-2",
+    crop: "Soybeans",
+    quantity: "2,200 bu",
+    price: "$11.40/bu",
+    pricePerUnit: 11.40,
+    location: "York, PA",
+    seller: "Sunrise Agri",
+    availableDate: "Apr 20",
+    quality: "Premium",
+    isUserListing: false,
+  },
+  {
+    id: "seed-3",
+    crop: "Wheat",
+    quantity: "3,500 bu",
+    price: "$5.60/bu",
+    pricePerUnit: 5.60,
+    location: "Harrisburg, PA",
+    seller: "Valley Grains",
+    availableDate: "Apr 21",
+    isUserListing: false,
+  },
+  {
+    id: "seed-4",
+    crop: "Corn",
+    quantity: "8,000 bu",
+    price: "$4.72/bu",
+    pricePerUnit: 4.72,
+    location: "Reading, PA",
+    seller: "Keystone Fields",
+    availableDate: "Apr 19",
+    isUserListing: false,
+  },
+  {
+    id: "seed-5",
+    crop: "Soybeans",
+    quantity: "1,800 bu",
+    price: "$11.25/bu",
+    pricePerUnit: 11.25,
+    location: "Allentown, PA",
+    seller: "Blue Ridge Farm",
+    availableDate: "Apr 20",
+    quality: "Grade A",
+    isUserListing: false,
+  },
+];
+
 const MarketplaceScreen = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("All");
+  const [searchFocused, setSearchFocused] = useState(false);
+
+  const contentAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(contentAnim, { toValue: 1, tension: 40, friction: 8, useNativeDriver: true }).start();
+  }, []);
 
   const { addPreorder, isPreordered } = usePreorders();
   const { listings: userListings } = useListings();
@@ -32,17 +100,20 @@ const MarketplaceScreen = () => {
 
   const filters = ["All", "Corn", "Soybeans", "Wheat", "Other"];
 
-  const allListings: Listing[] = userListings.map(listing => ({
-    id: listing.id,
-    crop: listing.crop,
-    quantity: `${listing.quantity} units`,
-    price: `$${listing.pricePerUnit.toFixed(2)}/unit`,
-    pricePerUnit: listing.pricePerUnit,
-    location: listing.location,
-    seller: "You",
-    availableDate: new Date(listing.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-    isUserListing: true,
-  }));
+  const allListings: Listing[] = [
+    ...userListings.map(listing => ({
+      id: listing.id,
+      crop: listing.crop,
+      quantity: `${listing.quantity} bu`,
+      price: `$${listing.pricePerUnit.toFixed(2)}/bu`,
+      pricePerUnit: listing.pricePerUnit,
+      location: listing.location,
+      seller: "You",
+      availableDate: new Date(listing.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      isUserListing: true,
+    })),
+    ...SEED_LISTINGS,
+  ];
 
   const searchFiltered = searchQuery.trim()
     ? allListings.filter(l =>
@@ -91,13 +162,16 @@ const MarketplaceScreen = () => {
     <View style={styles.container}>
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#6b7280" />
+        <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
+          <Ionicons name="search" size={20} color={searchFocused ? colors.green : colors.text3} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search crops, locations..."
+            placeholderTextColor={colors.text4}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
           />
         </View>
       </View>
@@ -120,6 +194,10 @@ const MarketplaceScreen = () => {
 
       {/* Listings */}
       <ScrollView style={styles.listingsContainer} contentContainerStyle={styles.listingsContent}>
+      <Animated.View style={{
+        opacity: contentAnim,
+        transform: [{ translateY: contentAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+      }}>
         {/* My Listings Section */}
         {myListings.length > 0 && (
           <>
@@ -158,6 +236,7 @@ const MarketplaceScreen = () => {
             </Text>
           </View>
         )}
+      </Animated.View>
       </ScrollView>
     </View>
   );
@@ -176,7 +255,11 @@ const ListingCard = ({
   onPreorder: () => void;
   isUserListing?: boolean;
 }) => (
-  <View style={[styles.listingCard, isUserListing && styles.userListingCard]}>
+  <TouchableOpacity
+    style={[styles.listingCard, isUserListing && styles.userListingCard]}
+    activeOpacity={0.92}
+    onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+  >
     {isUserListing && (
       <View style={styles.userListingBadge}>
         <Text style={styles.userListingText}>YOUR LISTING</Text>
@@ -232,7 +315,7 @@ const ListingCard = ({
         </TouchableOpacity>
       )}
     </View>
-  </View>
+  </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
@@ -249,11 +332,17 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.inputBg,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     gap: 8,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
+  searchBarFocused: {
+    borderColor: colors.green,
+    backgroundColor: colors.greenMuted,
   },
   searchInput: {
     flex: 1,

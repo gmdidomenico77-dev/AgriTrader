@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,9 @@ import {
   Dimensions,
   ActivityIndicator,
   RefreshControl,
+  Animated,
 } from "react-native";
+import { colors, confidenceColor } from "../../constants/theme";
 import { LineChart } from "react-native-chart-kit";
 import { Ionicons } from "@expo/vector-icons";
 import { predictionService, PredictionData, GraphData } from "../../lib/predictionService";
@@ -34,9 +36,18 @@ const ForecastScreen = () => {
   const latitude = profile?.latitude;
   const longitude = profile?.longitude;
 
+  const contentAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     loadPredictionData();
   }, [selectedCrop, userLocation, latitude, longitude]);
+
+  useEffect(() => {
+    if (!loading && !error) {
+      contentAnim.setValue(0);
+      Animated.spring(contentAnim, { toValue: 1, tension: 40, friction: 8, useNativeDriver: true }).start();
+    }
+  }, [loading, error]);
 
   const loadPredictionData = async () => {
     try {
@@ -68,6 +79,29 @@ const ForecastScreen = () => {
   };
 
   // Build chart data: historical prices + confidence band + forecast line
+  // Single source of truth for the chart shift.
+  // Prefer the USDA local bid as the anchor — it's the most location-specific current
+  // price signal. Fallback to the last historical price if no bid is available.
+  const anchorDelta = useMemo(() => {
+    const hist = historicalPrices.filter((n) => Number.isFinite(n) && n > 0);
+    const pts = graphData?.data_points ?? [];
+    if (!pts.length) return 0;
+    const firstPred = pts[0].predicted_price;
+    const anchorPrice =
+      prediction?.local_bid != null
+        ? prediction.local_bid
+        : hist.length > 0
+        ? hist[hist.length - 1]!
+        : null;
+    return anchorPrice !== null ? anchorPrice - firstPred : 0;
+  }, [historicalPrices, graphData, prediction?.local_bid]);
+
+  // The forward prices as they actually appear on the chart.
+  const anchoredForwardPrices = useMemo(() => {
+    const pts = graphData?.data_points ?? [];
+    return pts.map((p) => p.predicted_price + anchorDelta);
+  }, [graphData, anchorDelta]);
+
   const getChartData = () => {
     const hist = historicalPrices.filter((n) => Number.isFinite(n) && n > 0);
     const pts = graphData?.data_points ?? [];
@@ -80,11 +114,10 @@ const ForecastScreen = () => {
       };
     }
 
-    const forwardMain = pts.map((p) => p.predicted_price);
-    const forwardUpper = pts.map((p) => p.confidence_upper);
-    const forwardLower = pts.map((p) => p.confidence_lower);
+    const forwardMain = pts.map((p) => p.predicted_price + anchorDelta);
+    const forwardUpper = pts.map((p) => p.confidence_upper + anchorDelta);
+    const forwardLower = pts.map((p) => p.confidence_lower + anchorDelta);
 
-    // Historical points have no uncertainty band — use actual price for both bounds
     const mainData = [...hist, ...forwardMain];
     const upperData = [...hist, ...forwardUpper];
     const lowerData = [...hist, ...forwardLower];
@@ -115,7 +148,6 @@ const ForecastScreen = () => {
     return {
       labels: safeLabels,
       datasets: [
-        // Confidence band — drawn first so the main line sits on top
         {
           data: upperData,
           color: () => "rgba(45, 80, 22, 0.15)",
@@ -126,7 +158,6 @@ const ForecastScreen = () => {
           color: () => "rgba(45, 80, 22, 0.15)",
           strokeWidth: 1,
         },
-        // Main prediction line
         {
           data: mainData,
           color: () => "rgba(45, 80, 22, 1)",
@@ -136,43 +167,84 @@ const ForecastScreen = () => {
     };
   };
 
-  const trendLabel = useMemo(
-    () => graphData?.near_term_trend || prediction?.market_analysis.trend || "Stable",
-    [graphData?.near_term_trend, prediction?.market_analysis.trend],
-  );
+  // Derive near-term trend from the anchored forward curve (first half vs second half).
+  // This is what the chart actually shows — raw model trend fields can disagree after anchoring.
+  const trendLabel = useMemo(() => {
+    if (anchoredForwardPrices.length < 2) {
+      return graphData?.near_term_trend || prediction?.market_analysis.trend || "Stable";
+    }
+    const first = anchoredForwardPrices[0];
+    const mid = anchoredForwardPrices[Math.floor(anchoredForwardPrices.length / 2)];
+    const pct = first > 0 ? ((mid - first) / first) * 100 : 0;
+    if (pct > 1.5) return "Bullish";
+    if (pct > 0.4) return "Slightly Bullish";
+    if (pct < -1.5) return "Bearish";
+    if (pct < -0.4) return "Slightly Bearish";
+    return "Stable";
+  }, [anchoredForwardPrices, graphData, prediction]);
+
+  // Derive long-term trend from the full anchored curve (start vs end).
+  const longTermTrend = useMemo(() => {
+    if (anchoredForwardPrices.length < 2) return graphData?.long_term_trend ?? "Stable";
+    const first = anchoredForwardPrices[0];
+    const last = anchoredForwardPrices[anchoredForwardPrices.length - 1];
+    const pct = first > 0 ? ((last - first) / first) * 100 : 0;
+    if (pct > 1.5) return "Upward";
+    if (pct > 0.4) return "Slightly Upward";
+    if (pct < -1.5) return "Downward";
+    if (pct < -0.4) return "Slightly Downward";
+    return "Stable";
+  }, [anchoredForwardPrices, graphData]);
 
   const peakPrice = useMemo(() => {
-    if (graphData?.peak_price != null) return graphData.peak_price;
-    const pts = graphData?.data_points ?? [];
-    if (!pts.length) return prediction?.predicted_price ?? null;
-    return Math.max(...pts.map((p) => p.predicted_price), graphData?.current_price ?? 0);
-  }, [graphData, prediction]);
+    if (!anchoredForwardPrices.length) return prediction?.predicted_price ?? null;
+    return Math.max(...anchoredForwardPrices);
+  }, [anchoredForwardPrices, prediction]);
 
+  // Confidence range anchored to the same shift as the chart.
   const confidenceRange = useMemo(() => {
     if (!prediction) return null;
     return {
-      low: prediction.confidence_lower,
-      high: prediction.confidence_upper,
+      low: prediction.confidence_lower + anchorDelta,
+      high: prediction.confidence_upper + anchorDelta,
     };
-  }, [prediction]);
+  }, [prediction, anchorDelta]);
+
+  // Recommendation derived from the anchored forward curve so it matches what the chart shows.
+  // confidence_percentage always equals model_confidence so there's no inconsistency with the
+  // Model Confidence row in the Market Analysis card.
+  const derivedRecommendation = useMemo(() => {
+    const modelConfPct = Math.round((prediction?.model_confidence ?? 0.85) * 100);
+    if (anchoredForwardPrices.length < 2) {
+      return prediction?.recommendation
+        ? { ...prediction.recommendation, confidence_percentage: modelConfPct }
+        : { action: "Hold", confidence: "Medium", confidence_percentage: modelConfPct };
+    }
+    const first = anchoredForwardPrices[0];
+    const last = anchoredForwardPrices[anchoredForwardPrices.length - 1];
+    const pct = first > 0 ? ((last - first) / first) * 100 : 0;
+    if (pct > 1.5) return { action: "Hold", confidence: "High", confidence_percentage: modelConfPct };
+    if (pct > 0.4) return { action: "Hold", confidence: "Medium", confidence_percentage: modelConfPct };
+    if (pct < -1.5) return { action: "Sell", confidence: "High", confidence_percentage: modelConfPct };
+    if (pct < -0.4) return { action: "Sell", confidence: "Medium", confidence_percentage: modelConfPct };
+    return { action: "Hold", confidence: "Medium", confidence_percentage: modelConfPct };
+  }, [anchoredForwardPrices, prediction]);
 
   const recommendationColor = useMemo(() => {
-    if (!prediction) return "#22c55e";
-    switch (prediction.recommendation.action.toLowerCase()) {
+    switch (derivedRecommendation.action.toLowerCase()) {
       case "sell": return "#ef4444";
       case "buy": return "#22c55e";
       default: return "#f59e0b";
     }
-  }, [prediction]);
+  }, [derivedRecommendation]);
 
   const recommendationIcon = useMemo(() => {
-    if (!prediction) return "checkmark-circle";
-    switch (prediction.recommendation.action.toLowerCase()) {
+    switch (derivedRecommendation.action.toLowerCase()) {
       case "buy": return "arrow-up-circle";
       case "sell": return "arrow-down-circle";
       default: return "checkmark-circle";
     }
-  }, [prediction]);
+  }, [derivedRecommendation]);
 
   const trendColor = useMemo(() => {
     const t = trendLabel.toLowerCase();
@@ -216,21 +288,40 @@ const ForecastScreen = () => {
   return (
     <ScrollView
       style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.green} colors={[colors.green]} />}
     >
+      <Animated.View style={{
+        opacity: contentAnim,
+        transform: [{ translateY: contentAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+      }}>
+
       {/* Offline / fallback banner */}
       {isUsingFallback && (
         <View style={styles.fallbackBanner}>
           <View style={styles.fallbackLeft}>
             <Ionicons name="cloud-offline-outline" size={18} color="#b45309" />
             <View>
-              <Text style={styles.fallbackTitle}>Using Cached Estimates</Text>
-              <Text style={styles.fallbackText}>Live model unavailable — predictions may vary from current market</Text>
+              <Text style={styles.fallbackTitle}>Offline Estimate</Text>
+              <Text style={styles.fallbackText}>Live prediction service unavailable — showing a simplified estimate based on the latest known market price, not the full model</Text>
             </View>
           </View>
           <TouchableOpacity onPress={loadPredictionData} style={styles.fallbackRetry} activeOpacity={0.75}>
             <Ionicons name="refresh-outline" size={16} color="#b45309" />
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Regional-estimate honesty banner — only PA has real elevator-bid data today */}
+      {profile?.isPaSupported === false && (
+        <View style={styles.regionalBanner}>
+          <Ionicons name="information-circle-outline" size={18} color="#b45309" />
+          <View style={styles.regionalBannerText}>
+            <Text style={styles.fallbackTitle}>Regional Estimate</Text>
+            <Text style={styles.fallbackText}>
+              Pricing isn't hyperlocal yet for {profile?.locationState ?? "your area"}. Showing broader
+              regional trends, not elevator-bid-calibrated data like Pennsylvania.
+            </Text>
+          </View>
         </View>
       )}
 
@@ -252,12 +343,14 @@ const ForecastScreen = () => {
         ))}
       </View>
 
-      {/* Price header */}
-      <View style={styles.priceHeader}>
+      {/* Price header — card */}
+      <View style={[styles.card, styles.priceHeaderCard]}>
         <Text style={styles.cropName}>{selectedCrop}</Text>
         <View style={styles.priceRow}>
           <Text style={styles.currentPrice}>
-            ${prediction?.predicted_price?.toFixed(2) ?? "—"}
+            ${anchoredForwardPrices.length > 0
+              ? anchoredForwardPrices[anchoredForwardPrices.length - 1].toFixed(2)
+              : prediction?.predicted_price?.toFixed(2) ?? "—"}
           </Text>
           {confidenceRange && (
             <View style={styles.confidenceBadge}>
@@ -267,12 +360,16 @@ const ForecastScreen = () => {
             </View>
           )}
         </View>
-        <Text style={styles.locationText}>
-          <Ionicons name="location-outline" size={13} /> {userLocation}
-          {!isUsingFallback && (
-            <Text style={styles.liveTag}> · Live ML</Text>
-          )}
-        </Text>
+        <View style={styles.locationRow}>
+          <Ionicons name="location-outline" size={13} color="#6b7280" />
+          <Text style={styles.locationText}>
+            {userLocation}
+            {!isUsingFallback
+              ? <Text style={styles.liveTag}> · 30-day ML forecast</Text>
+              : <Text style={styles.liveTag}> · 30-day forecast</Text>
+            }
+          </Text>
+        </View>
       </View>
 
       {/* Chart */}
@@ -291,21 +388,21 @@ const ForecastScreen = () => {
           width={screenWidth - 64}
           height={220}
           chartConfig={{
-            backgroundColor: "#ffffff",
-            backgroundGradientFrom: "#ffffff",
-            backgroundGradientTo: "#ffffff",
+            backgroundColor: "#0f2506",
+            backgroundGradientFrom: "#1a3a0a",
+            backgroundGradientTo: "#0d1f05",
             decimalPlaces: 2,
-            color: (opacity = 1) => `rgba(45, 80, 22, ${opacity})`,
-            labelColor: (opacity = 1) => `rgba(107, 114, 128, ${opacity})`,
-            style: { borderRadius: 16 },
-            propsForDots: { r: "3", strokeWidth: "2", stroke: "#2d5016" },
+            color: (opacity = 1) => `rgba(134, 239, 172, ${opacity})`,
+            labelColor: (opacity = 1) => `rgba(156, 163, 175, ${opacity})`,
+            style: { borderRadius: 12 },
+            propsForDots: { r: "3", strokeWidth: "2", stroke: "#86efac" },
           }}
           bezier
           withShadow={false}
           style={styles.chart}
         />
         <Text style={styles.chartNote}>
-          Shaded lines show 95% confidence interval
+          Outer lines show 95% confidence band
         </Text>
       </View>
 
@@ -317,12 +414,12 @@ const ForecastScreen = () => {
         </View>
         <View style={styles.recommendationContent}>
           <Text style={[styles.actionText, { color: recommendationColor }]}>
-            {prediction?.recommendation.action ?? "Hold"}
+            {derivedRecommendation.action}
           </Text>
         </View>
         <Text style={[styles.confidenceText, { color: recommendationColor }]}>
-          {prediction?.recommendation.confidence ?? "High"} confidence ·{" "}
-          {prediction?.recommendation.confidence_percentage ?? 87}%
+          {derivedRecommendation.confidence} confidence ·{" "}
+          {derivedRecommendation.confidence_percentage}%
         </Text>
       </View>
 
@@ -338,7 +435,7 @@ const ForecastScreen = () => {
         </View>
         <View style={styles.analysisRow}>
           <Text style={styles.analysisLabel}>Long-Term Trend</Text>
-          <Text style={styles.analysisValue}>{graphData?.long_term_trend ?? "Stable"}</Text>
+          <Text style={styles.analysisValue}>{longTermTrend}</Text>
         </View>
         <View style={styles.analysisRow}>
           <Text style={styles.analysisLabel}>Optimal Sell Time</Text>
@@ -356,7 +453,7 @@ const ForecastScreen = () => {
         </View>
         <View style={styles.analysisRow}>
           <Text style={styles.analysisLabel}>Model Confidence</Text>
-          <Text style={styles.analysisValue}>
+          <Text style={[styles.analysisValue, { color: confidenceColor(Math.round((prediction?.model_confidence ?? 0) * 100)), fontWeight: '600' }]}>
             {Math.round((prediction?.model_confidence ?? 0) * 100)}%
           </Text>
         </View>
@@ -376,16 +473,14 @@ const ForecastScreen = () => {
               : "Pennsylvania"}{" "}
             · USDA AMS Report
           </Text>
-          {prediction.confidence_lower && prediction.confidence_upper && (
-            <Text style={styles.localBidRange}>
-              Bid range: ${prediction.confidence_lower.toFixed(2)} –{" "}
-              ${prediction.confidence_upper.toFixed(2)}
-            </Text>
-          )}
+          <Text style={styles.localBidRange}>
+            Current cash bid used to anchor price forecast
+          </Text>
         </View>
       )}
 
       <View style={styles.bottomPadding} />
+      </Animated.View>
     </ScrollView>
   );
 };
@@ -484,6 +579,28 @@ const styles = StyleSheet.create({
     backgroundColor: "#fde68a",
     marginLeft: 8,
   },
+  regionalBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#fffbeb",
+    borderLeftWidth: 4,
+    borderLeftColor: "#d97706",
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  regionalBannerText: {
+    flex: 1,
+  },
   cropSelector: {
     flexDirection: "row",
     padding: 16,
@@ -510,6 +627,10 @@ const styles = StyleSheet.create({
   priceHeader: {
     paddingHorizontal: 16,
     marginBottom: 4,
+  },
+  priceHeaderCard: {
+    marginBottom: 0,
+    paddingBottom: 16,
   },
   cropName: {
     fontSize: 22,
@@ -540,11 +661,16 @@ const styles = StyleSheet.create({
     color: "#166534",
     fontWeight: "500",
   },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+    marginBottom: 12,
+  },
   locationText: {
     fontSize: 13,
     color: "#6b7280",
-    marginTop: 4,
-    marginBottom: 12,
   },
   liveTag: {
     color: "#16a34a",

@@ -105,9 +105,14 @@ def _safe_float(value):
 
 
 def _normalize_location_code(user_location):
-    """Map free-text locations to supported state codes used by location_factors."""
+    """Map free-text locations to supported state codes used by location_factors.
+
+    Returns None for anything we don't actually have a location adjustment for —
+    callers must skip the multiplier entirely rather than silently mislabeling
+    an unsupported/unrecognized location as Pennsylvania.
+    """
     if not user_location:
-        return "PA"
+        return None
     raw = str(user_location).strip()
     upper = raw.upper()
     supported = {"PA", "OH", "IN", "IL"}
@@ -126,7 +131,7 @@ def _normalize_location_code(user_location):
     for name, code in mapping.items():
         if name in upper:
             return code
-    return "PA"
+    return None
 
 class AgriTraderAPI:
     """
@@ -486,7 +491,23 @@ class AgriTraderAPI:
 
         features = {**weather, **econ, **world, 'day_of_year': datetime.now().timetuple().tm_yday}
         return features
-    
+
+    _CROP_TO_WORLD_KEY = {
+        'corn': 'corn_world_price',
+        'soybeans': 'soy_world_price',
+        'wheat': 'wheat_world_price',
+    }
+
+    def get_world_price(self, crop):
+        """Current CBOT futures price ($/bu) for the given crop, from the cached
+        global data — used to compute local basis (local bid − futures)."""
+        world, _econ = self._get_global_data()
+        key = self._CROP_TO_WORLD_KEY.get(crop)
+        if not key:
+            return None
+        price = world.get(key)
+        return price if price else None
+
     def predict_crop_price(self, crop, user_location, prediction_days=1, lat=None, lon=None):
         """
         Main prediction function for the app
@@ -524,8 +545,9 @@ class AgriTraderAPI:
                 prediction['confidence_lower'] *= location_factor
                 prediction['confidence_upper'] *= location_factor
             
-            # Add location and recommendation
-            prediction['location'] = location_code
+            # Add location and recommendation — report the raw string when the
+            # location isn't one we have a real adjustment for, not a fabricated code
+            prediction['location'] = location_code or user_location
             prediction['recommendation'] = self.get_recommendation(prediction)
             prediction['market_analysis'] = self.get_market_analysis(crop, prediction)
             
@@ -572,7 +594,7 @@ class AgriTraderAPI:
             # Format for graph display
             graph_data = {
                 'crop': crop,
-                'location': location_code,
+                'location': location_code or user_location,
                 'data_points': predictions,
                 'current_price': predictions[0]['predicted_price'] if predictions else 0,
                 'trend': self.calculate_trend(predictions),

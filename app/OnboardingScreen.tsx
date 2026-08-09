@@ -12,7 +12,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUserProfile } from '../components/UserProfileContext';
-import { geocodingService } from '../lib/geocodingService';
+import LocationAutocomplete from '../components/LocationAutocomplete';
+import { LocationCandidate } from '../lib/geocodingService';
+import { colors } from '../constants/theme';
 
 interface OnboardingScreenProps {
   onComplete: (profileData: UserProfile) => void;
@@ -32,6 +34,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
     farmName: '',
   });
   const [inputFocused, setInputFocused] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<LocationCandidate | null>(null);
   const { updateProfile } = useUserProfile();
 
   const steps = [
@@ -62,8 +65,8 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       Alert.alert('Required Field', 'Please enter your display name');
       return;
     }
-    if (currentStep === 2 && !profileData.location.trim()) {
-      Alert.alert('Required Field', 'Please enter your location');
+    if (currentStep === 2 && !selectedLocation) {
+      Alert.alert('Please Select a Location', 'Start typing your city and choose it from the list.');
       return;
     }
     if (currentStep === 3 && !profileData.farmName.trim()) {
@@ -74,36 +77,25 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // Use async geocoding: tries local map first, then Open Meteo API,
-      // so locations like "York, PA" get real coordinates instead of Harrisburg.
-      const coords = await geocodingService.getCoordinatesAsync(profileData.location);
-      const locationRecognized = await geocodingService.isKnownLocationAsync(profileData.location);
-
-      const save = async () => {
-        const success = await updateProfile({
-          ...profileData,
-          latitude: coords.lat,
-          longitude: coords.lon,
-          createdAt: new Date(),
-        });
-        if (success) {
-          onComplete(profileData);
-        } else {
-          Alert.alert('Error', 'Failed to save profile. Please try again.');
-        }
-      };
-
-      if (!locationRecognized) {
-        Alert.alert(
-          'Location Not Recognized',
-          `We couldn't find "${profileData.location}" in our region database. Price predictions will use Pennsylvania defaults until your location is matched.\n\nYou can update your location anytime in Profile settings.`,
-          [
-            { text: 'Go Back', style: 'cancel' },
-            { text: 'Continue Anyway', onPress: save },
-          ]
-        );
+      // Coordinates and state are already known from the confirmed dropdown selection —
+      // no geocoding round trip needed here, and no way to have reached this point with
+      // an unresolved/garbage location.
+      const success = await updateProfile({
+        ...profileData,
+        location: selectedLocation!.label,
+        locationCity: selectedLocation!.city,
+        locationState: selectedLocation!.state,
+        locationStateCode: selectedLocation!.stateCode,
+        locationCountry: selectedLocation!.country,
+        isPaSupported: selectedLocation!.isPA,
+        latitude: selectedLocation!.lat,
+        longitude: selectedLocation!.lon,
+        createdAt: new Date(),
+      });
+      if (success) {
+        onComplete({ ...profileData, location: selectedLocation!.label });
       } else {
-        await save();
+        Alert.alert('Error', 'Failed to save profile. Please try again.');
       }
     }
   };
@@ -127,7 +119,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
         return (
           <View style={styles.stepContent}>
             <View style={styles.welcomeIcon}>
-              <Ionicons name="leaf" size={80} color="#2d5016" />
+              <Ionicons name="leaf" size={80} color={colors.green} />
             </View>
             <Text style={styles.welcomeText}>
               AgriTrader connects farmers, buyers, and agricultural professionals 
@@ -135,15 +127,15 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
             </Text>
             <View style={styles.featuresList}>
               <View style={styles.featureItem}>
-                <Ionicons name="trending-up" size={20} color="#2d5016" />
+                <Ionicons name="trending-up" size={20} color={colors.green} />
                 <Text style={styles.featureText}>Real-time price forecasting</Text>
               </View>
               <View style={styles.featureItem}>
-                <Ionicons name="storefront" size={20} color="#2d5016" />
+                <Ionicons name="storefront" size={20} color={colors.green} />
                 <Text style={styles.featureText}>Direct marketplace trading</Text>
               </View>
               <View style={styles.featureItem}>
-                <Ionicons name="cloudy" size={20} color="#2d5016" />
+                <Ionicons name="cloudy" size={20} color={colors.green} />
                 <Text style={styles.featureText}>Weather alerts & insights</Text>
               </View>
             </View>
@@ -153,7 +145,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
         return (
           <View style={styles.stepContent}>
             <View style={[styles.inputContainer, inputFocused && styles.inputContainerFocused]}>
-              <Ionicons name="person-outline" size={20} color={inputFocused ? "#2d5016" : "#6b7280"} style={styles.inputIcon} />
+              <Ionicons name="person-outline" size={20} color={inputFocused ? colors.green : colors.text3} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Enter your display name"
@@ -172,20 +164,22 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
       case 2:
         return (
           <View style={styles.stepContent}>
-            <View style={[styles.inputContainer, inputFocused && styles.inputContainerFocused]}>
-              <Ionicons name="location-outline" size={20} color={inputFocused ? "#2d5016" : "#6b7280"} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., Erie, PA"
-                value={profileData.location}
-                onChangeText={(value) => handleInputChange('location', value)}
-                onFocus={() => setInputFocused(true)}
-                onBlur={() => setInputFocused(false)}
-                autoFocus
-              />
-            </View>
+            <LocationAutocomplete
+              value={profileData.location}
+              onChangeText={(value) => {
+                handleInputChange('location', value);
+                setSelectedLocation(null); // editing after a pick invalidates the prior selection
+              }}
+              onSelect={(candidate) => {
+                setSelectedLocation(candidate);
+                handleInputChange('location', candidate.label);
+              }}
+              placeholder="Start typing your city, e.g. Erie"
+              autoFocus
+            />
             <Text style={styles.helpText}>
-              Your location helps us show you relevant local market data
+              Pick your city from the list — this confirms we can pull real weather and
+              local pricing for your area
             </Text>
           </View>
         );
@@ -193,7 +187,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
         return (
           <View style={styles.stepContent}>
             <View style={[styles.inputContainer, inputFocused && styles.inputContainerFocused]}>
-              <Ionicons name="leaf-outline" size={20} color={inputFocused ? "#2d5016" : "#6b7280"} style={styles.inputIcon} />
+              <Ionicons name="leaf-outline" size={20} color={inputFocused ? colors.green : colors.text3} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="e.g., Green Valley Farm"
@@ -240,7 +234,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
               <Ionicons 
                 name={steps[currentStep].icon as keyof typeof Ionicons.glyphMap} 
                 size={40} 
-                color="#2d5016" 
+                color={colors.green} 
               />
             </View>
             <Text style={styles.stepTitle}>{steps[currentStep].title}</Text>
@@ -254,7 +248,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
           <View style={styles.buttonContainer}>
             {currentStep > 0 && (
               <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-                <Ionicons name="chevron-back" size={20} color="#6b7280" />
+                <Ionicons name="chevron-back" size={20} color={colors.text3} />
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             )}
@@ -263,7 +257,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
               <Text style={styles.nextButtonText}>
                 {currentStep === steps.length - 1 ? 'Complete Setup' : 'Next'}
               </Text>
-              <Ionicons name="chevron-forward" size={20} color="#ffffff" />
+              <Ionicons name="chevron-forward" size={20} color={colors.white} />
             </TouchableOpacity>
           </View>
         </View>
@@ -275,7 +269,7 @@ const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.bg,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -286,18 +280,18 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 4,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.border,
     borderRadius: 2,
     marginBottom: 16,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#2d5016',
+    backgroundColor: colors.green,
     borderRadius: 2,
   },
   stepCounter: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text3,
     textAlign: 'center',
   },
   content: {
@@ -312,7 +306,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#f0f9ff',
+    backgroundColor: colors.greenMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -320,13 +314,13 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#1f2937',
+    color: colors.text1,
     textAlign: 'center',
     marginBottom: 8,
   },
   stepSubtitle: {
     fontSize: 16,
-    color: '#6b7280',
+    color: colors.text3,
     textAlign: 'center',
   },
   stepContent: {
@@ -338,7 +332,7 @@ const styles = StyleSheet.create({
   },
   welcomeText: {
     fontSize: 16,
-    color: '#374151',
+    color: colors.text2,
     lineHeight: 24,
     textAlign: 'center',
     marginBottom: 30,
@@ -353,21 +347,21 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 16,
-    color: '#374151',
+    color: colors.text2,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     marginBottom: 16,
   },
   inputContainerFocused: {
-    borderColor: '#2d5016',
+    borderColor: colors.green,
     borderWidth: 2,
   },
   inputIcon: {
@@ -376,12 +370,12 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#1f2937',
+    color: colors.text1,
     paddingVertical: 16,
   },
   helpText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text3,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -402,10 +396,10 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     fontSize: 16,
-    color: '#6b7280',
+    color: colors.text3,
   },
   nextButton: {
-    backgroundColor: '#2d5016',
+    backgroundColor: colors.green,
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 24,
@@ -416,7 +410,7 @@ const styles = StyleSheet.create({
   nextButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#ffffff',
+    color: colors.white,
   },
 });
 

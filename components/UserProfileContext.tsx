@@ -8,6 +8,12 @@ export interface UserProfile {
   location: string;
   latitude?: number;      // Optional: store lat for weather
   longitude?: number;    // Optional: store lon for weather
+  locationCity?: string;
+  locationState?: string;
+  locationStateCode?: string;
+  locationCountry?: string;
+  /** True only when the selected location is Pennsylvania — the only state with real elevator-bid data today. */
+  isPaSupported?: boolean;
   farmName: string;
   createdAt: Date;
   updatedAt: Date;

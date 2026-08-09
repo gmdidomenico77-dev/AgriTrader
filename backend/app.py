@@ -108,13 +108,19 @@ ALLOWED_CROPS = {"corn", "soybeans", "wheat"}
 MAX_PREDICTION_DAYS = 30
 
 
-def _lat_lon_to_pa_region(lat: float, lon: float) -> str:
+def _is_pa_coords(lat: float, lon: float) -> bool:
+    return 39.5 < lat < 42.5 and -80.6 < lon < -74.7
+
+
+def _lat_lon_to_pa_region(lat: float | None, lon: float | None) -> str | None:
     """Map Pennsylvania coordinates to USDA grain report region (east/central/west).
     Boundaries are approximate county-level splits used by PA Ag Statistics.
+
+    Returns None for missing or non-PA coordinates — callers must treat that as
+    "no real local bid available" rather than silently defaulting to a PA region.
     """
-    # Non-PA coordinates fall back to central (most representative)
-    if not (39.5 < lat < 42.5 and -80.6 < lon < -74.7):
-        return 'central'
+    if lat is None or lon is None or not _is_pa_coords(lat, lon):
+        return None
     if lon > -76.5:
         return 'east'
     elif lon > -78.0:
@@ -144,13 +150,19 @@ def _cached_prediction(
 
 def _get_usda_bid(crop: str, lat, lon):
     """Fetch the USDA local elevator bid for this crop + location.
-    Returns the bid dict on success, None on any failure."""
+
+    Returns (bid dict, region) on success. Returns (None, None) whenever the
+    location genuinely isn't Pennsylvania (or coordinates are missing) — we
+    never fabricate a PA bid for a location we can't actually price locally.
+    """
+    region = _lat_lon_to_pa_region(lat, lon)
+    if region is None:
+        return None, None
     try:
-        region = _lat_lon_to_pa_region(lat or 40.2737, lon or -76.8844)
         return usda_scraper.get_local_bids(crop, region), region
     except Exception as e:
         print(f"[WARNING] USDA bid lookup failed: {e}")
-        return None, 'central'
+        return None, region
 
 
 def _get_anchor_price(crop: str, user_location: str, lat, lon):
@@ -175,7 +187,26 @@ def _get_training_mean(crop: str) -> float:
     return api.unscaling_params.get(crop, {}).get('mean', 0)
 
 
-def _calibrate_prediction(result: dict, anchor: float, training_mean: float) -> dict:
+def _get_local_basis(crop: str, lat, lon):
+    """Real local basis = local USDA elevator bid − CBOT futures price.
+
+    This is the actual location-dependent signal (transport costs, local
+    supply/demand, storage capacity) described in grain-marketing basis
+    theory — replacing the old static per-state multiplier. Only computable
+    for Pennsylvania today, since that's the only state with a real scraped
+    bid source. Returns None whenever either side of the subtraction isn't
+    available (non-PA location, scrape failure, or futures fetch failure).
+    """
+    bid_data, region = _get_usda_bid(crop, lat, lon)
+    if not bid_data:
+        return None, None
+    futures_price = api.get_world_price(crop)
+    if not futures_price:
+        return None, region
+    return bid_data['average'] - futures_price, region
+
+
+def _calibrate_prediction(result: dict, anchor: float, training_mean: float, basis: float | None = None) -> dict:
     """Anchor ML prediction to current market while PRESERVING the model's signal.
 
     The model's output (after unscaling) reflects weather, economics, and
@@ -183,7 +214,14 @@ def _calibrate_prediction(result: dict, anchor: float, training_mean: float) -> 
     predictive signal:
 
         model_signal = ml_price - training_mean
-        calibrated   = anchor   + model_signal
+        calibrated   = anchor   + model_signal   [+ basis, when applicable]
+
+    `basis` is the real local basis (local USDA bid − CBOT futures) — the
+    actual location-dependent adjustment, replacing the old static per-state
+    multiplier. It's only added when the anchor itself did NOT already come
+    from the USDA bid (anchor_src == 'usda_bid'), since in that case the
+    local-price information is already fully baked into `anchor` and adding
+    it again would double-count it.
 
     This way:
       - Different locations → different weather → different ml_price →
@@ -196,7 +234,7 @@ def _calibrate_prediction(result: dict, anchor: float, training_mean: float) -> 
         return result
 
     model_signal = ml_price - training_mean
-    calibrated = anchor + model_signal
+    calibrated = anchor + model_signal + (basis or 0)
 
     result = dict(result)          # shallow copy — don't mutate the lru_cache dict
     ci_half = (result['confidence_upper'] - result['confidence_lower']) / 2.0
@@ -206,23 +244,28 @@ def _calibrate_prediction(result: dict, anchor: float, training_mean: float) -> 
     result['ml_raw_price']     = round(ml_price, 4)
     result['anchor_price']     = round(anchor, 4)
     result['model_signal']     = round(model_signal, 4)
+    if basis is not None:
+        result['local_basis'] = round(basis, 4)
     print(f"[CALIBRATED] ML=${ml_price:.2f}, mean={training_mean:.2f}, "
-          f"signal={model_signal:+.3f}, anchor=${anchor:.2f} -> ${calibrated:.2f}")
+          f"signal={model_signal:+.3f}, anchor=${anchor:.2f}, basis={basis} -> ${calibrated:.2f}")
     return result
 
 
-def _calibrate_graph(graph: dict, anchor: float, training_mean: float) -> dict:
+def _calibrate_graph(graph: dict, anchor: float, training_mean: float, basis: float | None = None) -> dict:
     """Apply signal-based calibration to every data point in the graph.
 
-    Each point: calibrated_N = anchor + (ml_N - training_mean)
+    Each point: calibrated_N = anchor + (ml_N - training_mean) + basis
 
     This preserves the model's predicted trend shape AND location-dependent
-    offsets, while grounding the absolute price level in reality.
+    offsets, while grounding the absolute price level in reality. See
+    _calibrate_prediction for why `basis` is skipped when the anchor already
+    came from the USDA bid.
     """
     pts = graph.get('data_points', [])
     if not pts or anchor <= 0:
         return graph
 
+    basis_term = basis or 0
     graph = dict(graph)
     new_pts = []
     for pt in pts:
@@ -231,7 +274,7 @@ def _calibrate_graph(graph: dict, anchor: float, training_mean: float) -> dict:
             new_pts.append(pt)
             continue
         signal = ml_p - training_mean
-        cal = anchor + signal
+        cal = anchor + signal + basis_term
         ci_half = (pt['confidence_upper'] - pt['confidence_lower']) / 2.0
         new_pts.append({
             **pt,
@@ -245,9 +288,11 @@ def _calibrate_graph(graph: dict, anchor: float, training_mean: float) -> dict:
         graph['current_price'] = new_pts[0]['predicted_price']
     if graph.get('peak_price'):
         ml_peak = graph['peak_price']
-        graph['peak_price'] = round(anchor + (ml_peak - training_mean), 4)
+        graph['peak_price'] = round(anchor + (ml_peak - training_mean) + basis_term, 4)
     graph['anchor_price'] = round(anchor, 4)
     graph['training_mean'] = round(training_mean, 4)
+    if basis is not None:
+        graph['local_basis'] = round(basis, 4)
     day1_signal = (pts[0].get('predicted_price', training_mean) - training_mean) if pts else 0
     print(f"[CALIBRATED GRAPH] anchor=${anchor:.2f}, mean={training_mean:.2f}, "
           f"day1_signal={day1_signal:+.3f}")
@@ -290,11 +335,16 @@ def predict_price(crop):
             result['local_bid_source'] = 'USDA AMS PA Grain Report'
             print(f"[USDA BID] {crop} ({region} PA): ${local_bid_data['average']:.2f}")
 
-        # Calibrate: anchor to current market, preserve ML model signal
+        # Calibrate: anchor to current market, preserve ML model signal, and
+        # apply the real local basis on top — unless the anchor itself is
+        # already the USDA bid (would double-count the same local signal).
         anchor, anchor_src = _get_anchor_price(crop, user_location, lat, lon)
         training_mean = _get_training_mean(crop)
         if anchor is not None and training_mean > 0:
-            result = _calibrate_prediction(result, anchor, training_mean)
+            basis = None
+            if anchor_src != 'usda_bid':
+                basis, _basis_region = _get_local_basis(crop, lat, lon)
+            result = _calibrate_prediction(result, anchor, training_mean, basis)
             result['anchor_source'] = anchor_src
 
         print(f"[PREDICTION] {crop}: ${result.get('predicted_price', 0):.2f}")
@@ -335,11 +385,14 @@ def predict_price_graph(crop):
             lon=lon,
         )
 
-        # Same anchor + calibration as the single-point endpoint
+        # Same anchor + calibration (including local basis) as the single-point endpoint
         anchor, anchor_src = _get_anchor_price(crop, user_location, lat, lon)
         training_mean = _get_training_mean(crop)
         if anchor is not None and training_mean > 0:
-            result = _calibrate_graph(result, anchor, training_mean)
+            basis = None
+            if anchor_src != 'usda_bid':
+                basis, _basis_region = _get_local_basis(crop, lat, lon)
+            result = _calibrate_graph(result, anchor, training_mean, basis)
             result['anchor_source'] = anchor_src
 
         # Attach USDA bid for informational display

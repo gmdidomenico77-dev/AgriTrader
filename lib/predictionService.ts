@@ -224,7 +224,9 @@ class PredictionService {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000); // fail fast — don't wait 20s for TCP timeout
+    // Northflank's single-worker gunicorn instance can cold-start past a few seconds;
+    // 4s was cutting the check off before a live backend could ever answer.
+    const timer = setTimeout(() => controller.abort(), 12000);
 
     try {
       const response = await fetch(`${API_BASE_URL}/health`, {
@@ -242,6 +244,11 @@ class PredictionService {
       this.backendCheckedAt = now;
       return false;
     }
+  }
+
+  /** Fire-and-forget health check to absorb cold-start latency before the user hits a screen that needs it. */
+  warmUp(): void {
+    this.isBackendAvailable().catch(() => {});
   }
 
   private trendLabelFromSeries(prices: number[]): string {

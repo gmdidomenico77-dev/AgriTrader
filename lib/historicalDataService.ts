@@ -89,8 +89,8 @@ class HistoricalDataService {
     return Number((sum / prices.length).toFixed(2));
   }
 
-  async getPriceChange(crop: string, days: number = 30): Promise<number> {
-    const prices = await this.getHistoricalPrices(crop, days);
+  async getPriceChange(crop: string, days: number = 30, location: string = 'PA'): Promise<number> {
+    const prices = await this.getHistoricalPrices(crop, days, location);
     if (prices.length < 2) return 0;
 
     const oldPrice = prices[0].price;

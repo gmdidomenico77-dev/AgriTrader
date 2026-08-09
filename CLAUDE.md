@@ -20,13 +20,8 @@ recommendations, and buy/sell crops with other users on the marketplace. The app
 
 ## Current Priorities
 1. Improve UI/UX — make frontend dynamic, add animations, polish visuals
-2. Fix AI model connectivity issue (only works with firewall disabled)
 3. Prep for House of Code presentation in Washington D.C. on April 21-22
 
-## Known Issues
-- AI models fail to connect unless laptop firewall is disabled — likely 
-  a network/CORS/outbound request issue, needs investigation
-- Frontend is mostly static, needs animations and dynamic elements
 
 
 ## What NOT to Touch

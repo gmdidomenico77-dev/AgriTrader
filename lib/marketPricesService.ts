@@ -6,6 +6,36 @@
 import { csvDataService } from './csvDataService';
 import { API_BASE_URL } from './config';
 
+// Mirrors predictionService LOCATION_FACTORS — CSV data is PA-anchored so we ratio-adjust.
+const LOCATION_FACTORS: Record<string, Record<string, number>> = {
+  PA: { corn: 0.98, soybeans: 0.97, wheat: 0.99 },
+  OH: { corn: 1.02, soybeans: 1.01, wheat: 1.00 },
+  IN: { corn: 1.01, soybeans: 1.00, wheat: 0.98 },
+  IL: { corn: 1.00, soybeans: 1.00, wheat: 1.00 },
+};
+
+function parseStateCode(location: string): string {
+  if (!location) return 'PA';
+  const s = location.trim().toUpperCase();
+  const supported = Object.keys(LOCATION_FACTORS);
+  if (supported.includes(s)) return s;
+  const afterComma = s.split(',').pop()?.trim() ?? '';
+  if (supported.includes(afterComma)) return afterComma;
+  const nameMap: Record<string, string> = {
+    PENNSYLVANIA: 'PA', OHIO: 'OH', INDIANA: 'IN', ILLINOIS: 'IL',
+  };
+  for (const [name, code] of Object.entries(nameMap)) {
+    if (s.includes(name)) return code;
+  }
+  return 'PA';
+}
+
+function locationRatio(crop: string, stateCode: string): number {
+  const paFactor = LOCATION_FACTORS['PA']?.[crop] ?? 1;
+  const targetFactor = LOCATION_FACTORS[stateCode]?.[crop] ?? paFactor;
+  return targetFactor / paFactor;
+}
+
 export interface CropPrice {
   crop: string;
   nationalPrice: number;
@@ -88,6 +118,12 @@ class MarketPricesService {
         return [];
       }
 
+      // Apply location-specific adjustment so CSV fallback prices vary by region.
+      const stateCode = parseStateCode(location);
+      const adjCorn = Number((corn * locationRatio('corn', stateCode)).toFixed(2));
+      const adjSoy = Number((soy * locationRatio('soybeans', stateCode)).toFixed(2));
+      const adjWheat = Number((wheat * locationRatio('wheat', stateCode)).toFixed(2));
+
       const national = (local: number, basis: number) =>
         Number((local - basis).toFixed(2));
 
@@ -95,22 +131,22 @@ class MarketPricesService {
       return [
         {
           crop: 'Corn',
-          nationalPrice: national(corn, this.PA_BASIS.corn),
-          localPrice: corn,
+          nationalPrice: national(adjCorn, this.PA_BASIS.corn),
+          localPrice: adjCorn,
           change: chCorn,
           timestamp: ts,
         },
         {
           crop: 'Soybeans',
-          nationalPrice: national(soy, this.PA_BASIS.soybeans),
-          localPrice: soy,
+          nationalPrice: national(adjSoy, this.PA_BASIS.soybeans),
+          localPrice: adjSoy,
           change: chSoy,
           timestamp: ts,
         },
         {
           crop: 'Wheat',
-          nationalPrice: national(wheat, this.PA_BASIS.wheat),
-          localPrice: wheat,
+          nationalPrice: national(adjWheat, this.PA_BASIS.wheat),
+          localPrice: adjWheat,
           change: chWheat,
           timestamp: ts,
         },

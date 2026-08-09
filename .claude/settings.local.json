@@ -3,7 +3,12 @@
     "allow": [
       "Bash(grep:*)",
       "Bash(python -c ' *)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(npx tsc *)",
+      "Bash(grep -iE \"\\\\.py$|\\\\.pkl$|api|backend|server\")",
+      "Bash(git check-ignore *)",
+      "Bash(powershell -Command \"Get-Content NORMAL_VALS_ml_training_data.csv -TotalCount 3\")",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

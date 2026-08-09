@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, KeyboardAvoidingView, Platform, Animated, RefreshControl } from "react-native";
+import { colors, confidenceColor } from "../../constants/theme";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useUserProfile } from "../../components/UserProfileContext";
@@ -10,6 +11,37 @@ import { marketPricesService, CropPrice } from "../../lib/marketPricesService";
 import { historicalDataService } from "../../lib/historicalDataService";
 import { predictionService } from "../../lib/predictionService";
 
+const SkeletonPriceRow = () => {
+  const pulse = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.75, duration: 750, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.35, duration: 750, useNativeDriver: true }),
+      ])
+    ).start();
+    return () => pulse.stopAnimation();
+  }, []);
+  return (
+    <Animated.View style={[skeletonStyles.row, { opacity: pulse }]}>
+      <View style={skeletonStyles.label} />
+      <View style={skeletonStyles.values}>
+        <View style={skeletonStyles.value} />
+        <View style={skeletonStyles.value} />
+        <View style={skeletonStyles.change} />
+      </View>
+    </Animated.View>
+  );
+};
+
+const skeletonStyles = StyleSheet.create({
+  row: { marginBottom: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.divider },
+  label: { width: 72, height: 14, borderRadius: 4, backgroundColor: colors.border, marginBottom: 10 },
+  values: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  value: { width: 56, height: 20, borderRadius: 4, backgroundColor: colors.border },
+  change: { width: 40, height: 16, borderRadius: 4, backgroundColor: colors.border },
+});
+
 const HomeScreen = () => {
   const { profile } = useUserProfile();
   const { preorders } = usePreorders();
@@ -18,6 +50,7 @@ const HomeScreen = () => {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [weatherAlerts, setWeatherAlerts] = useState<WeatherAlert[]>([]);
   const [prices, setPrices] = useState<CropPrice[]>([]);
+  const [pricesUpdatedAt, setPricesUpdatedAt] = useState<Date | null>(null);
   const [homeForecastText, setHomeForecastText] = useState<string>(
     "Loading market summary…",
   );
@@ -27,6 +60,7 @@ const HomeScreen = () => {
   const [forecastError, setForecastError] = useState(false);
   const [priceFocused, setPriceFocused] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [pricesLoading, setPricesLoading] = useState(true);
 
   // Entrance animations
   const headerAnim = useRef(new Animated.Value(0)).current;
@@ -66,6 +100,7 @@ const HomeScreen = () => {
 
   const loadData = async () => {
     setForecastError(false);
+    setPricesLoading(true);
     const location = profile?.location || 'PA';
     
     // Load weather - pass user's coordinates if available
@@ -76,16 +111,18 @@ const HomeScreen = () => {
     );
     setWeather(weatherData);
     
-    // Load weather alerts
-    const alerts = await weatherService.getWeatherAlerts(location);
+    // Load weather alerts — pass profile coordinates so they use the same location as the weather call
+    const alerts = await weatherService.getWeatherAlerts(location, profile?.latitude, profile?.longitude);
     setWeatherAlerts(alerts);
     
     const pricesData = await marketPricesService.getCurrentPrices(location);
     setPrices(pricesData);
+    setPricesUpdatedAt(new Date());
+    setPricesLoading(false);
 
     try {
       const [cornWeekPct, cornPred] = await Promise.all([
-        historicalDataService.getPriceChange("corn", 7),
+        historicalDataService.getPriceChange("corn", 7, location),
         predictionService.getPrediction(
           "corn",
           location,
@@ -94,8 +131,13 @@ const HomeScreen = () => {
         ),
       ]);
       const dir = cornWeekPct >= 0 ? "up" : "down";
+      const absPct = Math.abs(cornWeekPct).toFixed(1);
+      const trend = cornPred.market_analysis.trend;
+      const action = cornPred.recommendation.action;
+      const timing = cornPred.market_analysis.best_selling_time;
+      const confPct = cornPred.recommendation.confidence_percentage ?? Math.round((cornPred.model_confidence ?? 0) * 100);
       setHomeForecastText(
-        `Corn cash in your dataset is ${dir} ${Math.abs(cornWeekPct).toFixed(1)}% over the past week. Near-term outlook: ${cornPred.market_analysis.trend}. ${cornPred.recommendation.action}: ${cornPred.market_analysis.best_selling_time}.`,
+        `Corn prices near ${location} are ${dir} ${absPct}% over the past week. Near-term outlook: ${trend}. ML recommendation: ${action} — ${timing} (${confPct}% confidence).`,
       );
       setHomeModelConfidencePct(
         Math.round((cornPred.model_confidence ?? 0) * 100),
@@ -182,33 +224,42 @@ const HomeScreen = () => {
       <Animated.View style={cardStyle(card1Anim)}>
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>Current Prices</Text>
+          <Text style={[styles.cardTitle, { marginBottom: 0 }]}>Current Prices</Text>
           <TouchableOpacity onPress={() => setShowAlertModal(true)}>
             <Ionicons name="notifications-outline" size={20} color="#2d5016" />
           </TouchableOpacity>
         </View>
         
-        {prices.map((item, index) => (
-          <View key={index} style={styles.priceRow}>
-            <Text style={styles.cropName}>{item.crop}</Text>
-            <View style={styles.priceContainer}>
-              <View style={styles.priceColumn}>
-                <Text style={styles.priceLabel}>National</Text>
-                <Text style={styles.price}>${item.nationalPrice.toFixed(2)}</Text>
+        {pricesLoading
+          ? [0, 1, 2].map((i) => <SkeletonPriceRow key={i} />)
+          : prices.map((item, index) => (
+            <View key={index} style={styles.priceRow}>
+              <Text style={styles.cropName}>{item.crop}</Text>
+              <View style={styles.priceContainer}>
+                <View style={styles.priceColumn}>
+                  <Text style={styles.priceLabel}>National</Text>
+                  <Text style={styles.price}>${item.nationalPrice.toFixed(2)}</Text>
+                </View>
+                <View style={styles.priceColumn}>
+                  <Text style={styles.priceLabel}>Local</Text>
+                  <Text style={styles.price}>${item.localPrice.toFixed(2)}</Text>
+                </View>
+                <Text style={[styles.change, { color: item.change >= 0 ? colors.up : colors.down }]}>
+                  {item.change >= 0 ? '+' : ''}{item.change.toFixed(1)}%
+                </Text>
               </View>
-              <View style={styles.priceColumn}>
-                <Text style={styles.priceLabel}>Local</Text>
-                <Text style={styles.price}>${item.localPrice.toFixed(2)}</Text>
-              </View>
-              <Text style={[styles.change, { color: item.change >= 0 ? "#22c55e" : "#ef4444" }]}>
-                {item.change >= 0 ? '+' : ''}{item.change.toFixed(1)}%
-              </Text>
             </View>
-          </View>
-        ))}
-        <Text style={styles.priceNote}>
-          Regional price estimates from market data. See the Forecast tab for AI-powered predictions.
-        </Text>
+          ))}
+        <View style={styles.priceFooter}>
+          <Text style={styles.priceNote}>
+            Per-bushel cash prices · {profile?.location || 'PA'}
+          </Text>
+          {pricesUpdatedAt && (
+            <Text style={styles.priceTimestamp}>
+              Updated {pricesUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          )}
+        </View>
       </View>
       </Animated.View>
 
@@ -272,7 +323,7 @@ const HomeScreen = () => {
         ) : (
           <View style={styles.confidenceRow}>
             <Text style={styles.confidenceLabel}>Model confidence (corn)</Text>
-            <Text style={styles.confidenceValue}>
+            <Text style={[styles.confidenceValue, { color: confidenceColor(homeModelConfidencePct) }]}>
               {homeModelConfidencePct > 0 ? `${homeModelConfidencePct}%` : "—"}
             </Text>
           </View>
@@ -444,11 +495,21 @@ const styles = StyleSheet.create({
     minWidth: 50,
     textAlign: "right",
   },
+  priceFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+  },
   priceNote: {
     fontSize: 12,
     color: "#9ca3af",
-    marginTop: 8,
     fontStyle: "italic",
+    flex: 1,
+  },
+  priceTimestamp: {
+    fontSize: 11,
+    color: "#d1d5db",
   },
   alertCard: {
     borderLeftWidth: 4,
@@ -514,7 +575,6 @@ const styles = StyleSheet.create({
   confidenceValue: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#22c55e",
   },
   modalOverlay: {
     flex: 1,

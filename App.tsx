@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { Ionicons } from "@expo/vector-icons";
 import { NavigationContainer } from "@react-navigation/native"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { StatusBar } from "expo-status-bar"
-import { Ionicons } from "@expo/vector-icons"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 
 // Import contexts
@@ -40,7 +40,11 @@ function AuthNavigator() {
   if (loading || profileLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2d5016" />
+        <View style={styles.loadingBrand}>
+          <Ionicons name="leaf" size={40} color="#2d5016" />
+        </View>
+        <Text style={styles.loadingTitle}>AgriTrader</Text>
+        <ActivityIndicator size="small" color="#2d5016" style={{ marginTop: 24 }} />
       </View>
     );
   }
@@ -150,6 +154,14 @@ function AuthNavigator() {
 }
 
 export default function App() {
+  useEffect(() => {
+    // Warm the backend health check on app start so the first screen that
+    // needs a prediction doesn't pay a Northflank cold-start latency inline.
+    import('./lib/predictionService').then(({ predictionService }) => {
+      predictionService.warmUp();
+    });
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
@@ -173,5 +185,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f8fafc',
+    gap: 8,
+  },
+  loadingBrand: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1.5,
+    borderColor: '#bbf7d0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  loadingTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#2d5016',
+    letterSpacing: 0.5,
   },
 });

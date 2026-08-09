@@ -11,6 +11,20 @@ interface LocationCoordinates {
   state?: string;
 }
 
+/** A single ranked match returned while the user is typing, for the autocomplete dropdown. */
+export interface LocationCandidate {
+  id: string;
+  label: string;
+  city: string;
+  state?: string;
+  stateCode?: string;
+  country: string;
+  lat: number;
+  lon: number;
+  /** True only for Pennsylvania — the only state with real elevator-bid scraping today. */
+  isPA: boolean;
+}
+
 /** Two-letter keys must not substring-match inside longer place names */
 const STATE_ABBREV_KEYS = new Set(['pa', 'oh', 'in', 'il']);
 
@@ -51,6 +65,11 @@ class GeocodingService {
     'wv': 'West Virginia', 'de': 'Delaware', 'ky': 'Kentucky', 'mi': 'Michigan',
     'ia': 'Iowa', 'mo': 'Missouri', 'wi': 'Wisconsin', 'mn': 'Minnesota',
   };
+
+  /** Reverse of stateNames, e.g. "Pennsylvania" → "PA" — used to tag autocomplete candidates. */
+  private readonly admin1ToCode: Record<string, string> = Object.fromEntries(
+    Object.entries(this.stateNames).map(([code, name]) => [name.toLowerCase(), code.toUpperCase()])
+  );
 
   private stateAbbrevMatchesLocation(normalized: string, abbrev: string): boolean {
     if (normalized === abbrev) return true;
@@ -94,58 +113,88 @@ class GeocodingService {
     return null;
   }
 
-  /**
-   * Query Open Meteo's free geocoding API for coordinates.
-   * Restricts results to the US and prefers results in the user's state if provided.
-   */
-  private async geocodeViaOpenMeteo(location: string): Promise<LocationCoordinates | null> {
+  /** Raw fetch against Open Meteo's geocoding API, filtered to US results. Shared by geocodeViaOpenMeteo and searchLocations. */
+  private async fetchOpenMeteoResults(query: string, count: number): Promise<any[]> {
     try {
-      // Build a search query — expand state abbreviation for better results
-      // e.g. "York, PA" → search "York Pennsylvania"
-      let query = location.trim();
-      const commaMatch = query.match(/,\s*([a-zA-Z]{2})\s*$/);
+      let q = query.trim();
+      const commaMatch = q.match(/,\s*([a-zA-Z]{2})\s*$/);
       if (commaMatch) {
         const abbrev = commaMatch[1].toLowerCase();
         const fullState = this.stateNames[abbrev];
         if (fullState) {
-          query = query.replace(/,\s*[a-zA-Z]{2}\s*$/, `, ${fullState}`);
+          q = q.replace(/,\s*[a-zA-Z]{2}\s*$/, `, ${fullState}`);
         }
       }
 
-      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=${count}&language=en&format=json`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 5000);
 
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timer);
 
-      if (!response.ok) return null;
+      if (!response.ok) return [];
 
       const data = await response.json();
       const results: any[] = data.results ?? [];
-      if (results.length === 0) return null;
-
-      // Prefer US results
-      const usResults = results.filter((r: any) => r.country_code === 'US');
-      const best = usResults.length > 0 ? usResults[0] : results[0];
-
-      const coords: LocationCoordinates = {
-        lat: best.latitude,
-        lon: best.longitude,
-        city: best.name ?? location,
-        state: best.admin1 ?? undefined,
-      };
-
-      // Cache in the local map so future sync lookups hit
-      const cacheKey = location.toLowerCase().trim().replace(/\s+/g, ' ');
-      this.locationMap[cacheKey] = coords;
-
-      console.log(`[Geocoding] Open Meteo resolved "${location}" → ${coords.city}, ${coords.state} (${coords.lat}, ${coords.lon})`);
-      return coords;
+      return results.filter((r: any) => r.country_code === 'US');
     } catch (e) {
-      console.log(`[Geocoding] Open Meteo geocoding failed for "${location}":`, e);
-      return null;
+      console.log(`[Geocoding] Open Meteo lookup failed for "${query}":`, e);
+      return [];
     }
+  }
+
+  /**
+   * Query Open Meteo's free geocoding API for coordinates.
+   * Restricts results to the US and prefers results in the user's state if provided.
+   */
+  private async geocodeViaOpenMeteo(location: string): Promise<LocationCoordinates | null> {
+    const usResults = await this.fetchOpenMeteoResults(location, 5);
+    if (usResults.length === 0) return null;
+    const best = usResults[0];
+
+    const coords: LocationCoordinates = {
+      lat: best.latitude,
+      lon: best.longitude,
+      city: best.name ?? location,
+      state: best.admin1 ?? undefined,
+    };
+
+    // Cache in the local map so future sync lookups hit
+    const cacheKey = location.toLowerCase().trim().replace(/\s+/g, ' ');
+    this.locationMap[cacheKey] = coords;
+
+    console.log(`[Geocoding] Open Meteo resolved "${location}" → ${coords.city}, ${coords.state} (${coords.lat}, ${coords.lon})`);
+    return coords;
+  }
+
+  /**
+   * Live-typing autocomplete: returns the ranked list of matching US locations
+   * for the user to pick from (the picking IS the location-validation step).
+   * Requires at least 2 characters to avoid noisy single-letter queries.
+   */
+  async searchLocations(query: string): Promise<LocationCandidate[]> {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return [];
+
+    const results = await this.fetchOpenMeteoResults(trimmed, 8);
+    return results.map((r: any) => {
+      const state: string | undefined = r.admin1 ?? undefined;
+      const stateCode = state ? this.admin1ToCode[state.toLowerCase()] : undefined;
+      const city = r.name ?? trimmed;
+      const label = state ? `${city}, ${state}` : city;
+      return {
+        id: `${r.latitude}_${r.longitude}`,
+        label,
+        city,
+        state,
+        stateCode,
+        country: r.country ?? 'United States',
+        lat: r.latitude,
+        lon: r.longitude,
+        isPA: stateCode === 'PA',
+      };
+    });
   }
 
   /**
