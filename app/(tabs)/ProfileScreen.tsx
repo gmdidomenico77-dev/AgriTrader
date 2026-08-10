@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as Haptics from "expo-haptics";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, Platform, Switch } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, Platform, Switch, Linking } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LocationCandidate } from "../../lib/geocodingService";
@@ -325,6 +325,18 @@ const ProfileScreen = () => {
             <Text style={styles.settingText}>Help & Support</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color="#6b7280" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={() => Linking.openURL('https://docs.google.com/forms/d/e/1FAIpQLSfmUV1PjNz7kO7_0duY9AyrJG0BIkgeliblhePNJJFlSqWeuw/viewform?usp=dialog')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.settingLeft}>
+            <Ionicons name="chatbubble-ellipses-outline" size={24} color="#6b7280" />
+            <Text style={styles.settingText}>Feedback</Text>
+          </View>
+          <Ionicons name="open-outline" size={20} color="#6b7280" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.settingItem} onPress={handleSignOut}>
