@@ -1,7 +1,8 @@
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signInAnonymously,
+  signOut,
   User,
   onAuthStateChanged
 } from 'firebase/auth';
@@ -20,6 +21,21 @@ export const signUp = async (email: string, password: string) => {
 export const signIn = async (email: string, password: string) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    return { success: true, user: userCredential.user };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Sign in without an email/password — still issues a real Firebase user with
+ * a uid, so onboarding, profile storage, and per-account data scoping all
+ * work exactly like a normal account. Firebase's default local persistence
+ * means a returning guest resumes this same session until they sign out.
+ */
+export const signInAsGuest = async () => {
+  try {
+    const userCredential = await signInAnonymously(auth);
     return { success: true, user: userCredential.user };
   } catch (error: any) {
     return { success: false, error: error.message };

@@ -11,7 +11,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { signIn, signUp } from '../lib/authService';
+import { signIn, signUp, signInAsGuest } from '../lib/authService';
 import { showAlert } from '../lib/crossPlatformAlert';
 
 interface LoginScreenProps {
@@ -23,6 +23,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onSwitchToReg
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const handleLogin = async () => {
@@ -41,6 +42,20 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onSwitchToReg
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       showAlert('Login Failed', result.error);
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    setGuestLoading(true);
+    const result = await signInAsGuest();
+    setGuestLoading(false);
+
+    if (result.success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onLoginSuccess();
+    } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      showAlert('Guest Sign-In Failed', result.error);
     }
   };
 
@@ -107,6 +122,17 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onSwitchToReg
 
           <TouchableOpacity style={styles.registerButton} onPress={onSwitchToRegister} activeOpacity={0.85}>
             <Text style={styles.registerButtonText}>Create New Account</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.guestButton}
+            onPress={handleGuestLogin}
+            disabled={guestLoading}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.guestButtonText}>
+              {guestLoading ? 'Signing In...' : 'Sign In as Guest'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -227,6 +253,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#2d5016',
+  },
+  guestButton: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  guestButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6b7280',
+    textDecorationLine: 'underline',
   },
   footer: {
     alignItems: 'center',
