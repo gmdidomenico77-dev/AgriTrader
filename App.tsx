@@ -33,7 +33,6 @@ interface UserProfile {
 
 function AuthNavigator() {
   const [authScreen, setAuthScreen] = useState<'login' | 'register'>('login');
-  const [showOnboarding, setShowOnboarding] = useState(false);
   const { isAuthenticated, loading } = useAuth();
   const { profile, loading: profileLoading } = useUserProfile();
 
@@ -52,27 +51,35 @@ function AuthNavigator() {
   if (!isAuthenticated) {
     if (authScreen === 'login') {
       return (
-        <LoginScreen 
-          onLoginSuccess={() => setShowOnboarding(true)}
+        <LoginScreen
+          // Signing in doesn't need to do anything here — isAuthenticated flipping
+          // true is enough to re-render this component, and UserProfileContext
+          // re-fetches the existing profile on that same change.
+          onLoginSuccess={() => {}}
           onSwitchToRegister={() => setAuthScreen('register')}
         />
       );
     } else {
       return (
-        <RegisterScreen 
-          onRegisterSuccess={() => setShowOnboarding(true)}
+        <RegisterScreen
+          onRegisterSuccess={() => {}}
           onSwitchToLogin={() => setAuthScreen('login')}
         />
       );
     }
   }
 
-  if (showOnboarding || !profile) {
+  // Onboarding is purely a function of "does this account have a saved
+  // profile yet" — true for brand-new signups (no Firestore doc exists),
+  // false for a returning user signing in. There is no separate flag to
+  // desync from that, so a returning user can never get routed back through
+  // onboarding once their profile exists.
+  if (!profile) {
     return (
-      <OnboardingScreen 
+      <OnboardingScreen
         onComplete={async (profileData: UserProfile) => {
-          // Profile will be saved by the UserProfileProvider
-          setShowOnboarding(false);
+          // Profile will be saved by the UserProfileProvider — once `profile`
+          // is non-null, this component re-renders past the check above.
         }}
       />
     );

@@ -5,6 +5,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './AuthContext';
 
 export interface PriceAlert {
   id: string;
@@ -23,30 +24,35 @@ interface AlertsContextType {
 
 const AlertsContext = createContext<AlertsContextType | undefined>(undefined);
 
-const ALERTS_STORAGE_KEY = '@agritrader_alerts';
+const ALERTS_STORAGE_KEY_PREFIX = '@agritrader_alerts';
 
 export function AlertsProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
 
-  // Load alerts from storage on mount
+  // Reload whenever the signed-in account changes, so switching accounts on
+  // the same device never leaks one farmer's alerts into another's session.
   useEffect(() => {
-    loadAlerts();
-  }, []);
+    if (user?.uid) {
+      loadAlerts(user.uid);
+    } else {
+      setAlerts([]);
+    }
+  }, [user?.uid]);
 
-  const loadAlerts = async () => {
+  const loadAlerts = async (uid: string) => {
     try {
-      const stored = await AsyncStorage.getItem(ALERTS_STORAGE_KEY);
-      if (stored) {
-        setAlerts(JSON.parse(stored));
-      }
+      const stored = await AsyncStorage.getItem(`${ALERTS_STORAGE_KEY_PREFIX}:${uid}`);
+      setAlerts(stored ? JSON.parse(stored) : []);
     } catch (error) {
       console.error('Error loading alerts:', error);
     }
   };
 
   const saveAlerts = async (newAlerts: PriceAlert[]) => {
+    if (!user?.uid) return;
     try {
-      await AsyncStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(newAlerts));
+      await AsyncStorage.setItem(`${ALERTS_STORAGE_KEY_PREFIX}:${user.uid}`, JSON.stringify(newAlerts));
       setAlerts(newAlerts);
     } catch (error) {
       console.error('Error saving alerts:', error);
@@ -86,4 +92,3 @@ export function useAlerts() {
   }
   return context;
 }
-

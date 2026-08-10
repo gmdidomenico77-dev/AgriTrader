@@ -11,7 +11,7 @@ import threading
 import pandas as pd
 import numpy as np
 import requests
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait as futures_wait
 from datetime import datetime, timedelta
 from AgriTrader_ML_Models import AgriTraderMLModels
 
@@ -393,24 +393,40 @@ class AgriTraderAPI:
 
     def _do_refresh_global_data(self):
         """Fetch world prices + economic data and write to _global_data.
-        Runs synchronously — call from a background thread or at startup."""
+        Runs synchronously — call from a background thread or at startup.
+
+        This can run on the main thread at startup (via warm_up_global_cache)
+        or synchronously on a request thread if the cache is still empty, so
+        it must NEVER block longer than the deadline below — a single-worker
+        gunicorn process has no other capacity, and yfinance has repeatedly
+        hung outright (not just failed) rather than raising quickly. Previously
+        the `with ThreadPoolExecutor(...) as ex:` block's implicit
+        shutdown(wait=True) had no timeout at all, so a hung fetch could block
+        the entire app indefinitely — this is what caused the app to hang on
+        launch. `futures_wait(..., timeout=...)` enforces a real deadline;
+        anything still running past it falls back to neutral values and is
+        abandoned (the thread finishes or dies on its own, off the request path).
+        """
         _NEUTRAL_ECON  = {"10yr_treasury": 0.0, "unemployment_rate": 0.0, "cpi": 0.0, "usd_eur": 0.0}
         _NEUTRAL_WORLD = {"corn_world_price": 0.0, "soy_world_price": 0.0, "wheat_world_price": 0.0}
         try:
             print("[GLOBAL-CACHE] Refreshing world prices + economic data...")
-            # Fetch world prices and econ in parallel, each with a 20-second deadline
-            with ThreadPoolExecutor(max_workers=2) as ex:
-                f_econ  = ex.submit(self.get_current_economic_data)
-                f_world = ex.submit(self.get_world_prices)
-            # By this point both threads have finished (with or without errors)
-            econ  = f_econ.result()  if not f_econ.exception()  else _NEUTRAL_ECON
-            world = f_world.result() if not f_world.exception() else _NEUTRAL_WORLD
+            ex = ThreadPoolExecutor(max_workers=2)
+            f_econ  = ex.submit(self.get_current_economic_data)
+            f_world = ex.submit(self.get_world_prices)
+            futures_wait([f_econ, f_world], timeout=20)
+            econ  = f_econ.result()  if f_econ.done()  and not f_econ.exception()  else _NEUTRAL_ECON
+            world = f_world.result() if f_world.done() and not f_world.exception() else _NEUTRAL_WORLD
+            ex.shutdown(wait=False)  # don't block on stragglers past the deadline
             with _global_data_lock:
                 _global_data['world_prices']   = world
                 _global_data['economic_data']  = econ
                 _global_data['last_updated']   = time.time()
                 _global_data['refresh_in_progress'] = False
-            print("[GLOBAL-CACHE] Refresh complete.")
+            if not f_econ.done() or not f_world.done():
+                print("[GLOBAL-CACHE] WARNING: refresh exceeded 20s deadline — using neutral values for the slow fetch(es).")
+            else:
+                print("[GLOBAL-CACHE] Refresh complete.")
         except Exception as e:
             print(f"[GLOBAL-CACHE] Refresh failed: {e}")
             with _global_data_lock:

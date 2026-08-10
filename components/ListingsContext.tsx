@@ -5,6 +5,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './AuthContext';
 
 export interface Listing {
   id: string;
@@ -26,29 +27,35 @@ interface ListingsContextType {
 
 const ListingsContext = createContext<ListingsContextType | undefined>(undefined);
 
-const LISTINGS_STORAGE_KEY = '@agritrader_listings';
+const LISTINGS_STORAGE_KEY_PREFIX = '@agritrader_listings';
 
 export function ListingsProvider({ children }: { children: React.ReactNode}) {
+  const { user } = useAuth();
   const [listings, setListings] = useState<Listing[]>([]);
 
+  // Reload whenever the signed-in account changes, so switching accounts on
+  // the same device never leaks one farmer's listings into another's session.
   useEffect(() => {
-    loadListings();
-  }, []);
+    if (user?.uid) {
+      loadListings(user.uid);
+    } else {
+      setListings([]);
+    }
+  }, [user?.uid]);
 
-  const loadListings = async () => {
+  const loadListings = async (uid: string) => {
     try {
-      const stored = await AsyncStorage.getItem(LISTINGS_STORAGE_KEY);
-      if (stored) {
-        setListings(JSON.parse(stored));
-      }
+      const stored = await AsyncStorage.getItem(`${LISTINGS_STORAGE_KEY_PREFIX}:${uid}`);
+      setListings(stored ? JSON.parse(stored) : []);
     } catch (error) {
       console.error('Error loading listings:', error);
     }
   };
 
   const saveListings = async (newListings: Listing[]) => {
+    if (!user?.uid) return;
     try {
-      await AsyncStorage.setItem(LISTINGS_STORAGE_KEY, JSON.stringify(newListings));
+      await AsyncStorage.setItem(`${LISTINGS_STORAGE_KEY_PREFIX}:${user.uid}`, JSON.stringify(newListings));
       setListings(newListings);
     } catch (error) {
       console.error('Error saving listings:', error);
@@ -87,4 +94,3 @@ export function useListings() {
   }
   return context;
 }
-

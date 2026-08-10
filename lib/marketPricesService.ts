@@ -12,6 +12,20 @@
 import { csvDataService } from './csvDataService';
 import { API_BASE_URL } from './config';
 
+const FETCH_TIMEOUT_MS = 10_000;
+
+/** fetch() with a hard timeout — without this, a slow/hung backend leaves the
+ * Home screen's price skeleton spinning forever instead of falling back. */
+async function fetchWithTimeout(url: string, timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Mirrors predictionService LOCATION_FACTORS — CSV data is PA-anchored so we ratio-adjust.
 const LOCATION_FACTORS: Record<string, Record<string, number>> = {
   PA: { corn: 0.98, soybeans: 0.97, wheat: 0.99 },
@@ -93,8 +107,8 @@ class MarketPricesService {
         crops.map(async (crop) => {
           try {
             const [currentRes, histRes] = await Promise.all([
-              fetch(`${API_BASE_URL}/current/${crop.key}?location=${encodeURIComponent(location)}${coordParams}`),
-              fetch(`${API_BASE_URL}/historical/${crop.key}?days=2&location=${encodeURIComponent(location)}`),
+              fetchWithTimeout(`${API_BASE_URL}/current/${crop.key}?location=${encodeURIComponent(location)}${coordParams}`),
+              fetchWithTimeout(`${API_BASE_URL}/historical/${crop.key}?days=2&location=${encodeURIComponent(location)}`),
             ]);
             if (!currentRes.ok) return null;
             const currentData = (await currentRes.json()) as BackendCurrentPriceResponse;

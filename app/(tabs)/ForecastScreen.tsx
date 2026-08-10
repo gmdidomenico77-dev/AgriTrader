@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
-  ActivityIndicator,
   RefreshControl,
   Animated,
   Linking,
@@ -21,6 +20,160 @@ import { useUserProfile } from "../../components/UserProfileContext";
 const screenWidth = Dimensions.get("window").width;
 
 const CROPS = ["Corn", "Soybeans", "Wheat"];
+
+// Mirrors the pulsing-placeholder pattern used and proven in HomeScreen's SkeletonPriceRow.
+const ForecastSkeleton = () => {
+  const pulse = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.75, duration: 750, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.35, duration: 750, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  return (
+    <Animated.View style={{ opacity: pulse }}>
+      <View style={skeletonStyles.cropSelector}>
+        {[0, 1, 2].map((i) => (
+          <View key={i} style={skeletonStyles.cropPill} />
+        ))}
+      </View>
+
+      <View style={[skeletonStyles.card, skeletonStyles.priceHeaderCard]}>
+        <View style={skeletonStyles.cropName} />
+        <View style={skeletonStyles.priceRow}>
+          <View style={skeletonStyles.bigPrice} />
+          <View style={skeletonStyles.badge} />
+        </View>
+        <View style={skeletonStyles.locationLine} />
+      </View>
+
+      <View style={skeletonStyles.card}>
+        <View style={skeletonStyles.cardTitleBar} />
+        <View style={skeletonStyles.chartBlock} />
+      </View>
+
+      <View style={skeletonStyles.card}>
+        <View style={skeletonStyles.cardTitleBar} />
+        <View style={skeletonStyles.bigAction} />
+        <View style={skeletonStyles.smallLine} />
+      </View>
+
+      <View style={skeletonStyles.card}>
+        <View style={skeletonStyles.cardTitleBar} />
+        {[0, 1, 2, 3, 4].map((i) => (
+          <View key={i} style={skeletonStyles.analysisRow}>
+            <View style={skeletonStyles.rowLabel} />
+            <View style={skeletonStyles.rowValue} />
+          </View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+};
+
+const skeletonStyles = StyleSheet.create({
+  cropSelector: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 8,
+  },
+  cropPill: {
+    flex: 1,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: colors.border,
+  },
+  card: {
+    backgroundColor: colors.white,
+    marginHorizontal: 16,
+    marginTop: 16,
+    padding: 20,
+    borderRadius: 16,
+  },
+  priceHeaderCard: {
+    paddingBottom: 16,
+  },
+  cropName: {
+    width: 90,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+    marginBottom: 10,
+  },
+  priceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  bigPrice: {
+    width: 130,
+    height: 34,
+    borderRadius: 6,
+    backgroundColor: colors.border,
+  },
+  badge: {
+    width: 90,
+    height: 20,
+    borderRadius: 6,
+    backgroundColor: colors.border,
+  },
+  locationLine: {
+    width: 160,
+    height: 13,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+    marginTop: 10,
+  },
+  cardTitleBar: {
+    width: 140,
+    height: 17,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+    marginBottom: 14,
+  },
+  chartBlock: {
+    height: 200,
+    borderRadius: 12,
+    backgroundColor: colors.border,
+  },
+  bigAction: {
+    width: 100,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: colors.border,
+    marginBottom: 8,
+  },
+  smallLine: {
+    width: 150,
+    height: 13,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+  },
+  analysisRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 9,
+  },
+  rowLabel: {
+    width: 100,
+    height: 14,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+  },
+  rowValue: {
+    width: 60,
+    height: 14,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+  },
+});
 
 const ForecastScreen = () => {
   const [selectedCrop, setSelectedCrop] = useState("Corn");
@@ -102,6 +255,17 @@ const ForecastScreen = () => {
     const pts = graphData?.data_points ?? [];
     return pts.map((p) => p.predicted_price + anchorDelta);
   }, [graphData, anchorDelta]);
+
+  // graphData.data_points is generated from days_list = [1, 30, 60, 90, 120, 150, 180],
+  // so index 1 is the actual +30d point — what the headline price and its
+  // confidence badge should both describe (matching the "30-day ML forecast" label).
+  const THIRTY_DAY_INDEX = 1;
+
+  const headlinePrice = useMemo(() => {
+    if (anchoredForwardPrices.length > THIRTY_DAY_INDEX) return anchoredForwardPrices[THIRTY_DAY_INDEX];
+    if (anchoredForwardPrices.length > 0) return anchoredForwardPrices[0];
+    return prediction?.predicted_price ?? null;
+  }, [anchoredForwardPrices, prediction]);
 
   const getChartData = () => {
     const hist = historicalPrices.filter((n) => Number.isFinite(n) && n > 0);
@@ -202,14 +366,24 @@ const ForecastScreen = () => {
     return Math.max(...anchoredForwardPrices);
   }, [anchoredForwardPrices, prediction]);
 
-  // Confidence range anchored to the same shift as the chart.
+  // Confidence range for the SAME +30d point the headline price shows, anchored
+  // to the same shift as the chart. Falls back to the next-day prediction's own
+  // bounds only if the graph doesn't have a +30d point available.
   const confidenceRange = useMemo(() => {
+    const pts = graphData?.data_points ?? [];
+    const pt30 = pts.length > THIRTY_DAY_INDEX ? pts[THIRTY_DAY_INDEX] : null;
+    if (pt30) {
+      return {
+        low: pt30.confidence_lower + anchorDelta,
+        high: pt30.confidence_upper + anchorDelta,
+      };
+    }
     if (!prediction) return null;
     return {
       low: prediction.confidence_lower + anchorDelta,
       high: prediction.confidence_upper + anchorDelta,
     };
-  }, [prediction, anchorDelta]);
+  }, [graphData, prediction, anchorDelta]);
 
   // Recommendation derived from the anchored forward curve so it matches what the chart shows.
   // confidence_percentage always equals model_confidence so there's no inconsistency with the
@@ -264,10 +438,9 @@ const ForecastScreen = () => {
   // ── Loading state ────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2d5016" />
-        <Text style={styles.loadingText}>Loading predictions for {userLocation}…</Text>
-      </View>
+      <ScrollView style={styles.container}>
+        <ForecastSkeleton />
+      </ScrollView>
     );
   }
 
@@ -349,9 +522,7 @@ const ForecastScreen = () => {
         <Text style={styles.cropName}>{selectedCrop}</Text>
         <View style={styles.priceRow}>
           <Text style={styles.currentPrice}>
-            ${anchoredForwardPrices.length > 0
-              ? anchoredForwardPrices[anchoredForwardPrices.length - 1].toFixed(2)
-              : prediction?.predicted_price?.toFixed(2) ?? "—"}
+            ${headlinePrice != null ? headlinePrice.toFixed(2) : "—"}
           </Text>
           {confidenceRange && (
             <View style={styles.confidenceBadge}>

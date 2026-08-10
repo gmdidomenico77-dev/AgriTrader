@@ -24,67 +24,6 @@ interface Listing {
   isUserListing?: boolean;
 }
 
-const SEED_LISTINGS: Listing[] = [
-  {
-    id: "seed-1",
-    crop: "Corn",
-    quantity: "5,000 bu",
-    price: "$4.85/bu",
-    pricePerUnit: 4.85,
-    location: "Lancaster, PA",
-    seller: "Miller Farm",
-    availableDate: "Apr 21",
-    quality: "Grade A",
-    isUserListing: false,
-  },
-  {
-    id: "seed-2",
-    crop: "Soybeans",
-    quantity: "2,200 bu",
-    price: "$11.40/bu",
-    pricePerUnit: 11.40,
-    location: "York, PA",
-    seller: "Sunrise Agri",
-    availableDate: "Apr 20",
-    quality: "Premium",
-    isUserListing: false,
-  },
-  {
-    id: "seed-3",
-    crop: "Wheat",
-    quantity: "3,500 bu",
-    price: "$5.60/bu",
-    pricePerUnit: 5.60,
-    location: "Harrisburg, PA",
-    seller: "Valley Grains",
-    availableDate: "Apr 21",
-    isUserListing: false,
-  },
-  {
-    id: "seed-4",
-    crop: "Corn",
-    quantity: "8,000 bu",
-    price: "$4.72/bu",
-    pricePerUnit: 4.72,
-    location: "Reading, PA",
-    seller: "Keystone Fields",
-    availableDate: "Apr 19",
-    isUserListing: false,
-  },
-  {
-    id: "seed-5",
-    crop: "Soybeans",
-    quantity: "1,800 bu",
-    price: "$11.25/bu",
-    pricePerUnit: 11.25,
-    location: "Allentown, PA",
-    seller: "Blue Ridge Farm",
-    availableDate: "Apr 20",
-    quality: "Grade A",
-    isUserListing: false,
-  },
-];
-
 const MarketplaceScreen = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("All");
@@ -113,7 +52,6 @@ const MarketplaceScreen = () => {
       availableDate: new Date(listing.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       isUserListing: true,
     })),
-    ...SEED_LISTINGS,
   ];
 
   const searchFiltered = searchQuery.trim()
@@ -161,6 +99,14 @@ const MarketplaceScreen = () => {
 
   return (
     <View style={styles.container}>
+      {/* Honesty banner — listings aren't synced across devices/accounts yet */}
+      <View style={styles.previewBanner}>
+        <Ionicons name="information-circle-outline" size={18} color="#b45309" />
+        <Text style={styles.previewBannerText}>
+          Marketplace Preview — listings are saved on your device for now. Multi-farmer syncing is coming soon.
+        </Text>
+      </View>
+
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
@@ -324,6 +270,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f8fafc",
   },
+  previewBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#fffbeb",
+    borderLeftWidth: 4,
+    borderLeftColor: "#d97706",
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  previewBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#92400e",
+    lineHeight: 17,
+  },
   searchContainer: {
     padding: 16,
     backgroundColor: "#ffffff",
@@ -356,17 +326,17 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     marginRight: 8,
-    borderRadius: 20,
+    borderRadius: 8,
     backgroundColor: "#f3f4f6",
   },
   filterButtonActive: {
     backgroundColor: "#2d5016",
   },
   filterButtonText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "500",
     color: "#6b7280",
   },

@@ -5,6 +5,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './AuthContext';
 
 export interface Preorder {
   id: string;
@@ -26,30 +27,35 @@ interface PreordersContextType {
 
 const PreordersContext = createContext<PreordersContextType | undefined>(undefined);
 
-const PREORDERS_STORAGE_KEY = '@agritrader_preorders';
+const PREORDERS_STORAGE_KEY_PREFIX = '@agritrader_preorders';
 
 export function PreordersProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [preorders, setPreorders] = useState<Preorder[]>([]);
 
-  // Load preorders from storage on mount
+  // Reload whenever the signed-in account changes, so switching accounts on
+  // the same device never leaks one farmer's preorders into another's session.
   useEffect(() => {
-    loadPreorders();
-  }, []);
+    if (user?.uid) {
+      loadPreorders(user.uid);
+    } else {
+      setPreorders([]);
+    }
+  }, [user?.uid]);
 
-  const loadPreorders = async () => {
+  const loadPreorders = async (uid: string) => {
     try {
-      const stored = await AsyncStorage.getItem(PREORDERS_STORAGE_KEY);
-      if (stored) {
-        setPreorders(JSON.parse(stored));
-      }
+      const stored = await AsyncStorage.getItem(`${PREORDERS_STORAGE_KEY_PREFIX}:${uid}`);
+      setPreorders(stored ? JSON.parse(stored) : []);
     } catch (error) {
       console.error('Error loading preorders:', error);
     }
   };
 
   const savePreorders = async (newPreorders: Preorder[]) => {
+    if (!user?.uid) return;
     try {
-      await AsyncStorage.setItem(PREORDERS_STORAGE_KEY, JSON.stringify(newPreorders));
+      await AsyncStorage.setItem(`${PREORDERS_STORAGE_KEY_PREFIX}:${user.uid}`, JSON.stringify(newPreorders));
       setPreorders(newPreorders);
     } catch (error) {
       console.error('Error saving preorders:', error);
@@ -87,4 +93,3 @@ export function usePreorders() {
   }
   return context;
 }
-
