@@ -116,7 +116,7 @@ const HomeScreen = () => {
     const alerts = await weatherService.getWeatherAlerts(location, profile?.latitude, profile?.longitude);
     setWeatherAlerts(alerts);
     
-    const pricesData = await marketPricesService.getCurrentPrices(location);
+    const pricesData = await marketPricesService.getCurrentPrices(location, profile?.latitude, profile?.longitude);
     setPrices(pricesData);
     setPricesUpdatedAt(new Date());
     setPricesLoading(false);
@@ -259,7 +259,8 @@ const HomeScreen = () => {
         <View style={styles.priceFooter}>
           <Text style={styles.priceNote}>
             Per-bushel cash prices · {profile?.location || 'PA'}
-            {prices[0]?.localSource === 'usda_bid' ? ' · Local: live USDA elevator bid' : ''}
+            {prices[0]?.localSource === 'usda_bid' ? ' · Local: live USDA elevator bid (your region)' : ''}
+            {prices[0]?.localSource === 'usda_bid_statewide' ? ' · Local: live USDA elevator bid (PA statewide)' : ''}
           </Text>
           {pricesUpdatedAt && (
             <Text style={styles.priceTimestamp}>

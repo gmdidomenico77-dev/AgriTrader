@@ -685,42 +685,48 @@ class AgriTraderAPI:
         """
         Generate buy/sell/hold recommendation based on prediction
         Now using REAL prices (not scaled)
+
+        `confidence`/`confidence_percentage` here are labeled 'Strong'/'Moderate'
+        rather than 'High'/'Medium' — the underlying number is the model's
+        historical backtest R², not a live statistical confidence for this
+        specific forecast, so the wording avoids implying more certainty than
+        that number actually represents.
         """
         price = prediction['predicted_price']
         confidence = prediction['model_confidence']
-        
+
         # Get crop type from prediction context
         # For now, use simple logic based on price ranges
         # TODO: Could be improved with market context
-        
+
         # Simple recommendation logic (can be made more sophisticated)
-        if confidence > 0.8:  # High confidence
+        if confidence > 0.8:  # Strong historical model fit
             # Compare to confidence bounds
             price_range = prediction['confidence_upper'] - prediction['confidence_lower']
             mid_point = (prediction['confidence_upper'] + prediction['confidence_lower']) / 2
-            
+
             if price > mid_point + (price_range * 0.2):  # Price trending up
                 return {
                     'action': 'Hold',  # Wait for peak
-                    'confidence': 'High',
+                    'confidence': 'Strong',
                     'confidence_percentage': int(confidence * 100)
                 }
             elif price < mid_point - (price_range * 0.2):  # Price trending down
                 return {
                     'action': 'Sell',  # Sell before further decline
-                    'confidence': 'High',
+                    'confidence': 'Strong',
                     'confidence_percentage': int(confidence * 100)
                 }
             else:
                 return {
                     'action': 'Hold',
-                    'confidence': 'High',
+                    'confidence': 'Strong',
                     'confidence_percentage': int(confidence * 100)
                 }
-        else:  # Lower confidence
+        else:  # Weaker historical model fit
             return {
                 'action': 'Hold',
-                'confidence': 'Medium',
+                'confidence': 'Moderate',
                 'confidence_percentage': int(confidence * 100)
             }
     

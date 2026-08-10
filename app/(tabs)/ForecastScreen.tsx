@@ -419,8 +419,8 @@ const ForecastScreen = () => {
           </Text>
         </View>
         <Text style={[styles.confidenceText, { color: recommendationColor }]}>
-          {derivedRecommendation.confidence} confidence ·{" "}
-          {derivedRecommendation.confidence_percentage}%
+          {derivedRecommendation.confidence} conviction ·{" "}
+          {derivedRecommendation.confidence_percentage}% model fit
         </Text>
       </View>
 
@@ -453,11 +453,14 @@ const ForecastScreen = () => {
           </Text>
         </View>
         <View style={styles.analysisRow}>
-          <Text style={styles.analysisLabel}>Model Confidence</Text>
+          <Text style={styles.analysisLabel}>Model Fit (Backtest)</Text>
           <Text style={[styles.analysisValue, { color: confidenceColor(Math.round((prediction?.model_confidence ?? 0) * 100)), fontWeight: '600' }]}>
             {Math.round((prediction?.model_confidence ?? 0) * 100)}%
           </Text>
         </View>
+        <Text style={styles.chartNote}>
+          Model fit reflects historical backtest accuracy, not certainty about this specific forecast
+        </Text>
       </View>
 
       {/* Local market bid card — only shown when live backend returns USDA data */}

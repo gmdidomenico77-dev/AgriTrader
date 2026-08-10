@@ -72,7 +72,12 @@ class MarketPricesService {
     wheat: -0.2,
   };
 
-  async getCurrentPrices(location: string = 'PA'): Promise<CropPrice[]> {
+  /**
+   * @param lat, lon — when provided, the backend uses the same region-bucketed
+   * USDA elevator bid as the ML prediction anchor, so this screen's "Local"
+   * price always matches the Forecast screen's "Local Elevator Bid" card.
+   */
+  async getCurrentPrices(location: string = 'PA', lat?: number, lon?: number): Promise<CropPrice[]> {
     try {
       const crops = [
         { key: 'corn', label: 'Corn', basis: this.PA_BASIS.corn },
@@ -80,12 +85,15 @@ class MarketPricesService {
         { key: 'wheat', label: 'Wheat', basis: this.PA_BASIS.wheat },
       ] as const;
 
+      const coordParams =
+        Number.isFinite(lat) && Number.isFinite(lon) ? `&lat=${lat}&lon=${lon}` : '';
+
       // Prefer backend live/current values; if unavailable, fall back to bundled CSV.
       const liveRows = await Promise.all(
         crops.map(async (crop) => {
           try {
             const [currentRes, histRes] = await Promise.all([
-              fetch(`${API_BASE_URL}/current/${crop.key}?location=${encodeURIComponent(location)}`),
+              fetch(`${API_BASE_URL}/current/${crop.key}?location=${encodeURIComponent(location)}${coordParams}`),
               fetch(`${API_BASE_URL}/historical/${crop.key}?days=2&location=${encodeURIComponent(location)}`),
             ]);
             if (!currentRes.ok) return null;

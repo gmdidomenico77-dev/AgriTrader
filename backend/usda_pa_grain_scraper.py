@@ -25,6 +25,9 @@ class USDAGrainBidScraper:
     _cache_ts: float = 0.0
     _CACHE_TTL: float = 43200   # 12 hours in seconds
 
+    # Diagnostics: count of failed fetch/parse attempts, exposed via /api/diagnostics
+    parse_failures: int = 0
+
     def _make_session(self):
         """Return a requests Session with retries disabled and a hard 5-second timeout."""
         session = requests.Session()
@@ -129,6 +132,7 @@ class USDAGrainBidScraper:
         """Fetch + parse the USDA report, update _bid_cache. Returns True on success."""
         pdf_data = self.fetch_latest_report()
         if not pdf_data:
+            self.parse_failures += 1
             return False
         try:
             with pdfplumber.open(pdf_data) as pdf:
@@ -146,6 +150,7 @@ class USDAGrainBidScraper:
             return True
         except Exception as e:
             print(f"Error parsing USDA report: {e}")
+            self.parse_failures += 1
             return False
 
     def get_local_bids(self, crop, region='central'):

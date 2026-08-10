@@ -3,6 +3,8 @@ from flask_cors import CORS
 import sys
 import os
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from functools import lru_cache
 
@@ -106,6 +108,62 @@ def health_check():
 
 ALLOWED_CROPS = {"corn", "soybeans", "wheat"}
 MAX_PREDICTION_DAYS = 30
+
+
+# --------------------------------------------------------------------------
+# Lightweight in-memory diagnostics — reset on every process restart/deploy.
+# Purely observational: counts where prices actually came from, USDA parse
+# failures, and predictions where the anchor and raw model output disagree
+# unusually much, so this can be checked live (GET /api/diagnostics) without
+# needing Northflank log access.
+# --------------------------------------------------------------------------
+_diag_lock = threading.Lock()
+_diagnostics = {
+    'started_at': datetime.now(timezone.utc).isoformat(),
+    'price_source_counts': {},   # "{crop}:{source}" -> count
+    'large_anchor_discrepancies': 0,
+}
+_LARGE_DISCREPANCY_THRESHOLD = 0.75  # dollars/bushel
+
+
+def _diag_record_source(crop: str, source: str | None):
+    if not source:
+        return
+    key = f"{crop}:{source}"
+    with _diag_lock:
+        _diagnostics['price_source_counts'][key] = _diagnostics['price_source_counts'].get(key, 0) + 1
+
+
+def _diag_check_discrepancy(crop: str, predicted_price, ml_raw_price):
+    if predicted_price is None or ml_raw_price is None:
+        return
+    delta = abs(predicted_price - ml_raw_price)
+    if delta > _LARGE_DISCREPANCY_THRESHOLD:
+        with _diag_lock:
+            _diagnostics['large_anchor_discrepancies'] += 1
+        print(f"[DIAG] Large anchor-vs-raw discrepancy for {crop}: "
+              f"anchor-calibrated=${predicted_price:.2f} vs raw model=${ml_raw_price:.2f} (Δ${delta:.2f})")
+
+
+@app.route('/api/diagnostics', methods=['GET'])
+def get_diagnostics():
+    """Live troubleshooting snapshot — check this from a phone at the show if
+    a number looks off, without needing Northflank's log viewer."""
+    with _diag_lock:
+        snapshot = {
+            'started_at': _diagnostics['started_at'],
+            'price_source_counts': dict(_diagnostics['price_source_counts']),
+            'large_anchor_discrepancies': _diagnostics['large_anchor_discrepancies'],
+        }
+    usda_cache_age_seconds = (
+        round(time.time() - usda_scraper._cache_ts, 1) if usda_scraper._cache_ts else None
+    )
+    return jsonify({
+        **snapshot,
+        'usda_parse_failures': usda_scraper.parse_failures,
+        'usda_cache_age_seconds': usda_cache_age_seconds,
+        'usda_cache_populated': bool(usda_scraper._bid_cache),
+    })
 
 
 def _is_pa_coords(lat: float, lon: float) -> bool:
@@ -350,6 +408,8 @@ def predict_price(crop):
                 basis, _basis_region = _get_local_basis(crop, lat, lon)
             result = _calibrate_prediction(result, anchor, training_mean, basis)
             result['anchor_source'] = anchor_src
+            _diag_record_source(crop, anchor_src)
+            _diag_check_discrepancy(crop, result.get('predicted_price'), result.get('ml_raw_price'))
 
         print(f"[PREDICTION] {crop}: ${result.get('predicted_price', 0):.2f}")
         result.setdefault("diagnostics", {})
@@ -472,12 +532,18 @@ def get_historical_data(crop):
 def get_current_price(crop):
     """Get current market price for a crop.
 
-    Local price priority: live USDA elevator bid (PA only, refreshed at most
-    every 12h) > bundled CSV cash price > Yahoo Finance. The CSV is a known
-    weak link — it's only updated by a daily job that depends on yfinance,
-    which is prone to rate-limiting, so a CSV-sourced price is flagged
-    `is_stale` if its date is more than 4 days old rather than silently
-    presented as current.
+    Local price priority: region-bucketed USDA elevator bid (PA only, same
+    function the ML prediction anchor uses — east/central/west by lat/lon)
+    > PA statewide bid average (when lat/lon aren't available) > bundled CSV
+    cash price > Yahoo Finance. Using the SAME regional-bid function as the
+    prediction anchor is intentional: the Home screen's "Local" price and the
+    Forecast screen's "Local Elevator Bid" card (and the anchor itself) must
+    agree, or farmers get shown two different numbers both labeled "local."
+
+    The CSV is a known weak link — it's only updated by a daily job that
+    depends on yfinance, which is prone to rate-limiting, so a CSV-sourced
+    price is flagged `is_stale` if its date is more than 4 days old rather
+    than silently presented as current.
 
     National price is fetched independently and live (`api.get_world_price`)
     instead of being reconstructed from the local price with a hardcoded
@@ -486,19 +552,29 @@ def get_current_price(crop):
     """
     try:
         location = request.args.get('location', 'PA', type=str)
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
         location_code = _normalize_location_code(location)
 
         price = None
         price_date = None
         source = None
+        region = None
 
-        if location_code == 'PA':
+        bid_data, bid_region = _get_usda_bid(crop, lat, lon)
+        if bid_data:
+            price = bid_data['average']
+            price_date = bid_data.get('date')
+            source = 'usda_bid'
+            region = bid_region
+
+        if price is None and location_code == 'PA':
             try:
                 statewide = usda_scraper.get_statewide_average(crop)
                 if statewide:
                     price = statewide['statewide_average']
                     price_date = statewide.get('date')
-                    source = 'usda_bid'
+                    source = 'usda_bid_statewide'
             except Exception as e:
                 print(f"[WARNING] USDA statewide average failed: {e}")
 
@@ -515,6 +591,8 @@ def get_current_price(crop):
 
         if price is None:
             return jsonify({'error': 'Could not fetch current price'}), 500
+
+        _diag_record_source(crop, source)
 
         # USDA bids are fetched live on every cache miss, so treat them as
         # never stale even though the scraper's own `date` field is just
@@ -538,6 +616,7 @@ def get_current_price(crop):
             'current_price': price,
             'local_price': price,
             'local_price_source': source,
+            'local_bid_region': region,
             'national_price': national_price,
             'price_date': price_date,
             'is_stale': is_stale,
